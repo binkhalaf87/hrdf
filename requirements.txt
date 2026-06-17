@@ -1,0 +1,28 @@
+# Core
+streamlit>=1.32.0
+pandas>=2.2.0
+openpyxl>=3.1.2
+numpy>=1.26.4
+
+# PDF Processing
+pdfplumber>=0.10.3
+tabula-py>=2.9.0
+
+# OCR (for scanned PDFs)
+pytesseract>=0.3.10
+Pillow>=10.2.0
+pdf2image>=1.17.0
+
+# Matching
+rapidfuzz>=3.6.1
+
+# Arabic text support
+arabic-reshaper>=3.0.0
+python-bidi>=0.4.2
+
+# Testing
+pytest>=8.0.0
+pytest-cov>=4.1.0
+
+# Optional: for generating sample PDFs
+fpdf2>=2.7.9
