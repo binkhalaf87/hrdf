@@ -1,185 +1,241 @@
 from __future__ import annotations
 
 import io
-from typing import Optional
 
 import pandas as pd
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils.dataframe import dataframe_to_rows
 
-from models import BankEmployee, HadafEmployee, MatchResult, ProcessingSummary
+from models import BankEmployee, BankReportRow, HadafEmployee, MatchResult, ProcessingSummary
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# Colour palette
-# ---------------------------------------------------------------------------
-_GREEN = "C6EFCE"
+_GREEN  = "C6EFCE"
 _YELLOW = "FFEB9C"
-_RED = "FFC7CE"
-_BLUE = "BDD7EE"
-_HEADER_FILL = "2E75B6"
-_HEADER_FONT_COLOR = "FFFFFF"
+_RED    = "FFC7CE"
+_BLUE   = "BDD7EE"
+_ORANGE = "FCE4D6"
+_HEADER_BG    = "2E75B6"
+_HEADER_FONT  = "FFFFFF"
 
 
-def _apply_header_style(ws, row_num: int = 1) -> None:
-    for cell in ws[row_num]:
-        cell.font = Font(bold=True, color=_HEADER_FONT_COLOR)
-        cell.fill = PatternFill("solid", fgColor=_HEADER_FILL)
+def _style_header(ws, row: int = 1) -> None:
+    for cell in ws[row]:
+        cell.font = Font(bold=True, color=_HEADER_FONT)
+        cell.fill = PatternFill("solid", fgColor=_HEADER_BG)
         cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
 
-def _set_column_widths(ws, min_width: int = 12, max_width: int = 40) -> None:
+def _col_widths(ws, mn: int = 10, mx: int = 40) -> None:
     for col in ws.columns:
-        max_len = max(len(str(cell.value or "")) for cell in col)
-        ws.column_dimensions[col[0].column_letter].width = min(max(max_len + 2, min_width), max_width)
+        w = max(len(str(c.value or "")) for c in col)
+        ws.column_dimensions[col[0].column_letter].width = min(max(w + 2, mn), mx)
 
 
-def _df_to_sheet(
-    ws,
-    df: pd.DataFrame,
-    fill_color: Optional[str] = None,
-    rtl: bool = True,
-) -> None:
-    """Write DataFrame to an openpyxl worksheet with styling."""
-    for r_idx, row in enumerate(dataframe_to_rows(df, index=False, header=True), start=1):
-        for c_idx, value in enumerate(row, start=1):
-            cell = ws.cell(row=r_idx, column=c_idx, value=value)
-            if r_idx == 1:
-                pass  # header styled separately
-            elif fill_color:
-                cell.fill = PatternFill("solid", fgColor=fill_color)
-            cell.alignment = Alignment(
-                horizontal="right" if rtl else "left",
-                vertical="center",
-            )
-
-    _apply_header_style(ws)
-    _set_column_widths(ws)
+def _write_df(ws, df: pd.DataFrame, fill: str = "", rtl: bool = True) -> None:
+    for r, row in enumerate(dataframe_to_rows(df, index=False, header=True), start=1):
+        for c, val in enumerate(row, start=1):
+            cell = ws.cell(row=r, column=c, value=val)
+            cell.alignment = Alignment(horizontal="right" if rtl else "left", vertical="center")
+            if r > 1 and fill:
+                cell.fill = PatternFill("solid", fgColor=fill)
+    _style_header(ws)
+    _col_widths(ws)
     if rtl:
         ws.sheet_view.rightToLeft = True
 
 
-class ExcelWriter:
-    """Generates Excel output files from matching results."""
+def _to_bytes(wb: Workbook) -> bytes:
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
 
+
+class ExcelWriter:
+
+    # ------------------------------------------------------------------ #
+    #  تقرير البنك المُحدَّث — الأهم                                      #
+    # ------------------------------------------------------------------ #
+    def build_bank_report_excel(self, rows: list[BankReportRow]) -> bytes:
+        """
+        تقرير البنك الكامل:
+        - كل سجلات البنك
+        - مع الرقم التسلسلي لهدف لكل موظف مطابق
+        - مقارنة المبالغ
+        ملوّن حسب الحالة: أخضر=مطابق، أصفر=مراجعة، أحمر=غير مطابق
+        """
+        wb = Workbook()
+        wb.remove(wb.active)
+        ws = wb.create_sheet("تقرير البنك المُحدَّث")
+        ws.sheet_view.rightToLeft = True
+
+        headers = [
+            "اسم الموظف (البنك)",
+            "الرقم التسلسلي (هدف)",
+            "اسم الموظف (هدف)",
+            "الآيبان",
+            "المبلغ المحوَّل (البنك)",
+            "مبلغ هدف",
+            "الفرق",
+            "طريقة المطابقة",
+            "نسبة الثقة %",
+            "الحالة",
+            "رقم المرجع",
+        ]
+
+        status_fill = {
+            "matched":   _GREEN,
+            "review":    _YELLOW,
+            "bank_only": _RED,
+        }
+
+        for r_idx, row in enumerate([headers] + [None] * len(rows), start=1):
+            if r_idx == 1:
+                for c_idx, h in enumerate(headers, start=1):
+                    cell = ws.cell(row=1, column=c_idx, value=h)
+                    cell.font = Font(bold=True, color=_HEADER_FONT)
+                    cell.fill = PatternFill("solid", fgColor=_HEADER_BG)
+                    cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            else:
+                brow = rows[r_idx - 2]
+                fill = PatternFill("solid", fgColor=status_fill.get(brow.status, "FFFFFF"))
+                values = [
+                    brow.bank_name,
+                    brow.hadaf_serial,
+                    brow.hadaf_name or "",
+                    brow.iban or "",
+                    brow.bank_amount,
+                    brow.hadaf_support_amount if brow.hadaf_support_amount is not None else "",
+                    brow.amount_diff if brow.amount_diff is not None else "",
+                    brow.match_method or "",
+                    f"{brow.confidence:.1f}%" if brow.confidence is not None else "",
+                    self._status_label(brow.status),
+                    brow.reference or "",
+                ]
+                for c_idx, val in enumerate(values, start=1):
+                    cell = ws.cell(row=r_idx, column=c_idx, value=val)
+                    cell.fill = fill
+                    cell.alignment = Alignment(horizontal="right", vertical="center")
+
+        _col_widths(ws)
+        return _to_bytes(wb)
+
+    # ------------------------------------------------------------------ #
+    #  ملفات المطابقة التفصيلية                                           #
+    # ------------------------------------------------------------------ #
     def build_matched_excel(self, results: list[MatchResult]) -> bytes:
-        df = pd.DataFrame(
-            [
-                {
-                    "الرقم التسلسلي": r.hadaf_serial,
-                    "اسم هدف": r.hadaf_name,
-                    "اسم البنك": r.bank_name,
-                    "الآيبان": r.iban or "",
-                    "المبلغ": r.amount,
-                    "طريقة المطابقة": r.match_method,
-                    "نسبة الثقة %": r.confidence,
-                }
-                for r in results
-            ]
-        )
-        return self._write_single_sheet(df, "المطابقات", fill_color=_GREEN)
+        df = pd.DataFrame([{
+            "الرقم التسلسلي (هدف)": r.hadaf_serial,
+            "اسم هدف": r.hadaf_name,
+            "اسم البنك": r.bank_name,
+            "الآيبان": r.iban or "",
+            "المبلغ (البنك)": r.bank_amount,
+            "مبلغ هدف": r.hadaf_support_amount if r.hadaf_support_amount else "",
+            "الفرق": r.amount_diff if r.amount_diff is not None else "",
+            "طريقة المطابقة": r.match_method,
+            "نسبة الثقة %": r.confidence,
+        } for r in results])
+        return self._single(df, "المطابقات", _GREEN)
 
     def build_review_excel(self, results: list[MatchResult]) -> bytes:
-        df = pd.DataFrame(
-            [
-                {
-                    "اسم البنك": r.bank_name,
-                    "الآيبان": r.iban or "",
-                    "المبلغ": r.amount,
-                    "الاسم المقترح (هدف)": r.hadaf_name,
-                    "الرقم التسلسلي المقترح": r.hadaf_serial,
-                    "طريقة المطابقة": r.match_method,
-                    "نسبة الثقة %": r.confidence,
-                }
-                for r in results
-            ]
-        )
-        return self._write_single_sheet(df, "للمراجعة", fill_color=_YELLOW)
+        df = pd.DataFrame([{
+            "اسم البنك": r.bank_name,
+            "الاسم المقترح (هدف)": r.hadaf_name,
+            "الرقم التسلسلي المقترح": r.hadaf_serial,
+            "الآيبان": r.iban or "",
+            "المبلغ (البنك)": r.bank_amount,
+            "مبلغ هدف": r.hadaf_support_amount if r.hadaf_support_amount else "",
+            "الفرق": r.amount_diff if r.amount_diff is not None else "",
+            "طريقة المطابقة": r.match_method,
+            "نسبة الثقة %": r.confidence,
+        } for r in results])
+        return self._single(df, "للمراجعة", _YELLOW)
 
     def build_unmatched_excel(self, unmatched: list[BankEmployee]) -> bytes:
-        df = pd.DataFrame(
-            [
-                {
-                    "اسم البنك": e.name,
-                    "الآيبان": e.iban or "",
-                    "المبلغ": e.amount,
-                    "رقم المرجع": e.reference or "",
-                }
-                for e in unmatched
-            ]
-        )
-        return self._write_single_sheet(df, "غير مطابق", fill_color=_RED)
+        df = pd.DataFrame([{
+            "اسم البنك": e.name,
+            "الآيبان": e.iban or "",
+            "المبلغ": e.amount,
+            "رقم المرجع": e.reference or "",
+        } for e in unmatched])
+        return self._single(df, "غير مطابق", _RED)
+
+    def build_hadaf_not_in_bank_excel(self, employees: list[HadafEmployee]) -> bytes:
+        """موظفو هدف الذين لم ينزل راتبهم."""
+        df = pd.DataFrame([{
+            "الرقم التسلسلي": e.serial,
+            "اسم الموظف": e.name_arabic,
+            "رقم الهوية": e.national_id or "",
+            "الآيبان": e.iban or "",
+            "مبلغ هدف": e.support_amount if e.support_amount else "",
+        } for e in employees])
+        return self._single(df, "هدف غير موجود بالبنك", _ORANGE)
 
     def build_summary_excel(
         self,
         summary: ProcessingSummary,
-        hadaf_employees: list[HadafEmployee],
-        bank_employees: list[BankEmployee],
         matched: list[MatchResult],
         review: list[MatchResult],
-        unmatched_bank: list[BankEmployee],
     ) -> bytes:
         wb = Workbook()
-        wb.remove(wb.active)  # remove default sheet
+        wb.remove(wb.active)
 
-        # ---- Summary sheet ----
-        ws_summary = wb.create_sheet("ملخص")
-        ws_summary.sheet_view.rightToLeft = True
-
-        summary_data = [
+        # Sheet 1: ملخص أرقام
+        ws = wb.create_sheet("ملخص")
+        ws.sheet_view.rightToLeft = True
+        rows = [
             ("البيان", "القيمة"),
             ("إجمالي موظفي هدف", summary.total_hadaf),
-            ("إجمالي موظفي البنك", summary.total_bank),
-            ("المطابقات الناجحة", summary.matched),
-            ("تحتاج مراجعة", summary.review_required),
-            ("غير مطابق", summary.unmatched),
-            ("نسبة النجاح %", f"{summary.success_rate:.2f}%"),
+            ("إجمالي سجلات البنك", summary.total_bank),
+            ("مطابق بنجاح ✅", summary.matched),
+            ("تحتاج مراجعة ⚠️", summary.review_required),
+            ("غير مطابق ❌", summary.unmatched),
+            ("موظفو هدف لم ينزل راتبهم", summary.hadaf_not_in_bank),
+            ("نسبة النجاح", f"{summary.success_rate:.1f}%"),
         ]
-        fills = [_HEADER_FILL, _GREEN, _BLUE, _GREEN, _YELLOW, _RED, _GREEN]
-        for row_idx, (label, value) in enumerate(summary_data, start=1):
-            cell_a = ws_summary.cell(row=row_idx, column=1, value=label)
-            cell_b = ws_summary.cell(row=row_idx, column=2, value=value)
-            if row_idx == 1:
-                for cell in (cell_a, cell_b):
-                    cell.font = Font(bold=True, color=_HEADER_FONT_COLOR)
-                    cell.fill = PatternFill("solid", fgColor=_HEADER_FILL)
-            else:
-                for cell in (cell_a, cell_b):
-                    cell.fill = PatternFill("solid", fgColor=fills[row_idx - 1])
-            for cell in (cell_a, cell_b):
+        fills_by_row = {
+            1: _HEADER_BG,
+            3: _GREEN, 4: _GREEN,
+            5: _YELLOW,
+            6: _RED,
+            7: _ORANGE,
+            8: _GREEN,
+        }
+        for r, (label, val) in enumerate(rows, start=1):
+            ca = ws.cell(row=r, column=1, value=label)
+            cb = ws.cell(row=r, column=2, value=val)
+            bg = fills_by_row.get(r, "FFFFFF")
+            for cell in (ca, cb):
+                cell.fill = PatternFill("solid", fgColor=bg)
                 cell.alignment = Alignment(horizontal="right", vertical="center")
+                if r == 1:
+                    cell.font = Font(bold=True, color=_HEADER_FONT)
+        ws.column_dimensions["A"].width = 35
+        ws.column_dimensions["B"].width = 20
 
-        ws_summary.column_dimensions["A"].width = 30
-        ws_summary.column_dimensions["B"].width = 20
+        # Sheet 2: طرق المطابقة
+        if matched or review:
+            ws2 = wb.create_sheet("طرق المطابقة")
+            ws2.sheet_view.rightToLeft = True
+            all_r = matched + review
+            df = (pd.DataFrame([{"method": r.match_method} for r in all_r])
+                  .groupby("method").size().reset_index(name="count"))
+            df.columns = ["طريقة المطابقة", "العدد"]
+            _write_df(ws2, df, fill=_BLUE)
 
-        # ---- Method breakdown ----
-        ws_methods = wb.create_sheet("طرق المطابقة")
-        ws_methods.sheet_view.rightToLeft = True
-        all_results = matched + review
-        if all_results:
-            method_counts = (
-                pd.DataFrame([{"method": r.match_method} for r in all_results])
-                .groupby("method")
-                .size()
-                .reset_index(name="count")
-            )
-            method_counts.columns = ["طريقة المطابقة", "العدد"]
-            _df_to_sheet(ws_methods, method_counts, fill_color=_BLUE)
-
-        buffer = io.BytesIO()
-        wb.save(buffer)
-        return buffer.getvalue()
+        return _to_bytes(wb)
 
     @staticmethod
-    def _write_single_sheet(df: pd.DataFrame, sheet_name: str, fill_color: str) -> bytes:
+    def _status_label(status: str) -> str:
+        return {"matched": "مطابق ✅", "review": "يحتاج مراجعة ⚠️",
+                "bank_only": "غير مطابق ❌"}.get(status, status)
+
+    @staticmethod
+    def _single(df: pd.DataFrame, sheet: str, fill: str) -> bytes:
         wb = Workbook()
         wb.remove(wb.active)
-        ws = wb.create_sheet(sheet_name)
-        _df_to_sheet(ws, df, fill_color=fill_color)
-        buffer = io.BytesIO()
-        wb.save(buffer)
-        return buffer.getvalue()
+        ws = wb.create_sheet(sheet)
+        _write_df(ws, df, fill=fill)
+        return _to_bytes(wb)

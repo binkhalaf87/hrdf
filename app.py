@@ -1,20 +1,11 @@
-"""
-نظام مطابقة رواتب هدف مع البنوك السعودية
-Hadaf-Bank Salary Matching System
-"""
-
+"""نظام مطابقة رواتب هدف مع البنوك السعودية"""
 from __future__ import annotations
-
 import sys
 from pathlib import Path
-
-import streamlit as st
-
-# Ensure project root is on the path
 sys.path.insert(0, str(Path(__file__).parent))
 
+import streamlit as st
 from matcher.matching_engine import MatchingEngine
-from models import ProcessingSummary
 from parser.bank_parser import BankParser
 from parser.hadaf_parser import HadafParser
 from reports.excel_writer import ExcelWriter
@@ -22,9 +13,6 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# ---------------------------------------------------------------------------
-# Page config
-# ---------------------------------------------------------------------------
 st.set_page_config(
     page_title="نظام مطابقة رواتب هدف",
     page_icon="📊",
@@ -32,86 +20,54 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ---------------------------------------------------------------------------
-# CSS — RTL support and custom styling
-# ---------------------------------------------------------------------------
-st.markdown(
-    """
-    <style>
-    body, .stApp { direction: rtl; }
-    .metric-card {
-        background: #f0f2f6;
-        border-radius: 10px;
-        padding: 16px;
-        text-align: center;
-        border: 1px solid #ddd;
-    }
-    .metric-card .value { font-size: 2rem; font-weight: bold; }
-    .metric-card .label { font-size: 0.9rem; color: #666; }
-    .matched   { color: #1a7a1a; }
-    .review    { color: #b86e00; }
-    .unmatched { color: #c0392b; }
-    .success   { color: #2471a3; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+st.markdown("""
+<style>
+body, .stApp { direction: rtl; }
+.status-box { border-radius:8px; padding:12px 16px; margin:6px 0; font-size:15px; }
+.green  { background:#c6efce; border-left:4px solid #1a7a1a; }
+.yellow { background:#ffeb9c; border-left:4px solid #b86e00; }
+.red    { background:#ffc7ce; border-left:4px solid #c0392b; }
+.orange { background:#fce4d6; border-left:4px solid #c55a11; }
+</style>
+""", unsafe_allow_html=True)
 
-
-# ---------------------------------------------------------------------------
-# Sidebar
-# ---------------------------------------------------------------------------
+# ── Sidebar ──────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title("📊 نظام المطابقة")
     st.markdown("---")
-    st.markdown(
-        """
-        **الإصدار:** 1.0.0
-        **مراحل المطابقة:**
-        1. رقم الهوية الوطنية
-        2. رقم الآيبان / الرقم التسلسلي
-        3. الاسم العربي الكامل
-        4. مطابقة ذكية (RapidFuzz)
-        5. ترجمة عربي ↔ إنجليزي
+    st.markdown("""
+**الإصدار:** 1.1.0
 
-        **حدود الثقة:**
-        - ✅ ≥ 95%: مطابق
-        - ⚠️ 80–95%: يحتاج مراجعة
-        - ❌ < 80%: غير مطابق
-        """
-    )
+**مراحل المطابقة:**
+1. رقم الآيبان (هدف ↔ بنك)
+2. رقم الهوية الوطنية
+3. الرقم التسلسلي
+4. الاسم العربي الكامل
+5. مطابقة ذكية (RapidFuzz)
+6. ترجمة عربي ↔ إنجليزي
+
+**حدود الثقة:**
+- ✅ ≥ 95%: مطابق
+- ⚠️ 80–95%: يحتاج مراجعة
+- ❌ < 80%: غير مطابق
+""")
     st.markdown("---")
-    st.caption("تطوير: نظام معالجة رواتب هدف")
+    show_debug = st.checkbox("🔍 عرض تشخيص PDF", value=False)
 
-
-# ---------------------------------------------------------------------------
-# Main page
-# ---------------------------------------------------------------------------
+# ── Main ──────────────────────────────────────────────────────────────────────
 st.title("🏦 نظام مطابقة رواتب هدف مع البنوك السعودية")
-st.markdown("قم برفع ملف هدف وملف البنك لبدء عملية المطابقة الآلية.")
 
-col_hadaf, col_bank = st.columns(2)
-
-with col_hadaf:
+col_h, col_b = st.columns(2)
+with col_h:
     st.subheader("📁 ملف هدف (Hadaf PDF)")
-    hadaf_file = st.file_uploader(
-        "ارفع ملف هدف",
-        type=["pdf"],
-        key="hadaf_upload",
-        help="ملف PDF يحتوي على بيانات موظفي برنامج هدف",
-    )
-
-with col_bank:
+    hadaf_file = st.file_uploader("ارفع ملف هدف", type=["pdf"], key="hadaf_up",
+                                   help="ملف PDF ببيانات موظفي برنامج هدف")
+with col_b:
     st.subheader("🏦 ملف البنك (Bank PDF)")
-    bank_file = st.file_uploader(
-        "ارفع ملف البنك",
-        type=["pdf"],
-        key="bank_upload",
-        help="ملف PDF كشف رواتب البنك",
-    )
+    bank_file  = st.file_uploader("ارفع ملف البنك", type=["pdf"], key="bank_up",
+                                   help="ملف PDF كشف رواتب البنك")
 
 st.markdown("---")
-
 process_btn = st.button(
     "⚙️ معالجة الملفات / Process Files",
     type="primary",
@@ -119,195 +75,241 @@ process_btn = st.button(
     disabled=(hadaf_file is None or bank_file is None),
 )
 
+# ── Processing ────────────────────────────────────────────────────────────────
 if process_btn and hadaf_file and bank_file:
     hadaf_bytes = hadaf_file.read()
-    bank_bytes = bank_file.read()
+    bank_bytes  = bank_file.read()
 
+    hadaf_parser = HadafParser()
+    bank_parser  = BankParser()
+
+    # Debug info
+    if show_debug:
+        with st.expander("🔍 تشخيص ملف هدف", expanded=True):
+            dbg = hadaf_parser.debug_extract(hadaf_bytes)
+            st.write(f"**عدد الصفحات:** {dbg.get('page_count', '?')}")
+            st.write(f"**جداول مكتشفة:** {len(dbg.get('tables', []))}")
+            for t in dbg.get("tables", []):
+                st.write(f"  صفحة {t['page']} — {t['rows']} صف × {t['cols']} عمود")
+                st.write(f"  العناوين: {t['header']}")
+                st.write(f"  عينة: {t['sample']}")
+            if dbg.get("text_sample"):
+                st.code(dbg["text_sample"], language=None)
+
+        with st.expander("🔍 تشخيص ملف البنك", expanded=True):
+            dbg = bank_parser.debug_extract(bank_bytes)
+            st.write(f"**عدد الصفحات:** {dbg.get('page_count', '?')}")
+            st.write(f"**جداول مكتشفة:** {len(dbg.get('tables', []))}")
+            for t in dbg.get("tables", []):
+                st.write(f"  صفحة {t['page']} — {t['rows']} صف × {t['cols']} عمود")
+                st.write(f"  العناوين: {t['header']}")
+                st.write(f"  عينة: {t['sample']}")
+            if dbg.get("text_sample"):
+                st.code(dbg["text_sample"], language=None)
+
+    # Parse
     with st.spinner("جاري استخراج بيانات ملف هدف..."):
         try:
-            hadaf_parser = HadafParser()
             hadaf_employees = hadaf_parser.parse(hadaf_bytes)
-            st.success(f"✅ تم استخراج {len(hadaf_employees)} موظف من ملف هدف")
         except Exception as exc:
-            st.error(f"فشل في استخراج بيانات هدف: {exc}")
-            st.stop()
-
-    with st.spinner("جاري استخراج بيانات ملف البنك..."):
-        try:
-            bank_parser = BankParser()
-            bank_employees = bank_parser.parse(bank_bytes)
-            st.success(f"✅ تم استخراج {len(bank_employees)} سجل من ملف البنك")
-        except Exception as exc:
-            st.error(f"فشل في استخراج بيانات البنك: {exc}")
+            st.error(f"فشل استخراج بيانات هدف: {exc}")
             st.stop()
 
     if not hadaf_employees:
-        st.error("لم يتم العثور على موظفين في ملف هدف. تحقق من تنسيق الملف.")
+        st.error("""
+⛔ **لم يتم العثور على موظفين في ملف هدف.**
+
+**أسباب محتملة:**
+- الملف محمي بكلمة مرور
+- تنسيق مختلف (جداول مدمجة أو نص غير منظم)
+- ملف ممسوح ضوئياً (يحتاج Tesseract OCR)
+
+**الحل:** فعّل خيار "عرض تشخيص PDF" من الشريط الجانبي لرؤية ما تم استخراجه.
+        """)
         st.stop()
+
+    st.success(f"✅ تم استخراج **{len(hadaf_employees)}** موظف من ملف هدف")
+
+    with st.spinner("جاري استخراج بيانات ملف البنك..."):
+        try:
+            bank_employees = bank_parser.parse(bank_bytes)
+        except Exception as exc:
+            st.error(f"فشل استخراج بيانات البنك: {exc}")
+            st.stop()
 
     if not bank_employees:
-        st.error("لم يتم العثور على سجلات في ملف البنك. تحقق من تنسيق الملف.")
+        st.error("⛔ لم يتم استخراج سجلات من ملف البنك. فعّل التشخيص لمزيد من التفاصيل.")
         st.stop()
 
-    with st.spinner("جاري تنفيذ المطابقة..."):
-        engine = MatchingEngine()
-        result = engine.match(hadaf_employees, bank_employees)
+    st.success(f"✅ تم استخراج **{len(bank_employees)}** سجل من ملف البنك")
 
-    st.session_state["engine_result"] = result
-    st.session_state["hadaf_employees"] = hadaf_employees
-    st.session_state["bank_employees"] = bank_employees
+    with st.spinner("جاري المطابقة..."):
+        result = MatchingEngine().match(hadaf_employees, bank_employees)
 
+    st.session_state.update({
+        "result": result,
+        "hadaf_employees": hadaf_employees,
+        "bank_employees": bank_employees,
+    })
 
-# ---------------------------------------------------------------------------
-# Results display
-# ---------------------------------------------------------------------------
-if "engine_result" in st.session_state:
-    result = st.session_state["engine_result"]
-    hadaf_employees = st.session_state["hadaf_employees"]
-    bank_employees = st.session_state["bank_employees"]
-    summary: ProcessingSummary = result.summary
+# ── Results ───────────────────────────────────────────────────────────────────
+if "result" in st.session_state:
+    result           = st.session_state["result"]
+    hadaf_employees  = st.session_state["hadaf_employees"]
+    bank_employees   = st.session_state["bank_employees"]
+    s                = result.summary
 
     st.markdown("## 📈 نتائج المطابقة")
 
-    # Metrics row
-    c1, c2, c3, c4, c5 = st.columns(5)
-    with c1:
-        st.metric("إجمالي موظفي البنك", summary.total_bank)
-    with c2:
-        st.metric("المطابقات ✅", summary.matched)
-    with c3:
-        st.metric("تحتاج مراجعة ⚠️", summary.review_required)
-    with c4:
-        st.metric("غير مطابق ❌", summary.unmatched)
-    with c5:
-        st.metric("نسبة النجاح 🎯", f"{summary.success_rate:.1f}%")
+    # ---- KPI cards ----
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("موظفو هدف 📋",        s.total_hadaf)
+    c2.metric("سجلات البنك 🏦",       s.total_bank)
+    c3.metric("مطابق ✅",             s.matched)
+    c4.metric("يحتاج مراجعة ⚠️",     s.review_required)
+    c5.metric("غير مطابق ❌",        s.unmatched)
+    c6.metric("نسبة النجاح 🎯",      f"{s.success_rate:.1f}%")
+
+    # ---- Hadaf-not-in-bank alert ----
+    if s.hadaf_not_in_bank > 0:
+        st.markdown(
+            f'<div class="status-box orange">⚠️ <b>{s.hadaf_not_in_bank} موظف في هدف</b> '
+            f'لم ينزل راتبهم في البنك هذا الشهر.</div>',
+            unsafe_allow_html=True,
+        )
 
     st.markdown("---")
 
-    # Result tabs
-    tab_matched, tab_review, tab_unmatched = st.tabs(
-        ["✅ المطابقات", "⚠️ تحتاج مراجعة", "❌ غير مطابق"]
-    )
+    # ---- Tabs ----
+    tab_bank, tab_matched, tab_review, tab_unmatched, tab_hadaf_only = st.tabs([
+        "📄 تقرير البنك الكامل",
+        "✅ المطابقات",
+        "⚠️ تحتاج مراجعة",
+        "❌ غير مطابق",
+        "📋 هدف غير موجود بالبنك",
+    ])
+
+    import pandas as pd
+
+    with tab_bank:
+        st.caption("جميع سجلات البنك مع الرقم التسلسلي لهدف لكل موظف مطابق")
+        df = pd.DataFrame([{
+            "اسم الموظف (البنك)":      r.bank_name,
+            "الرقم التسلسلي (هدف)":    r.hadaf_serial or "",
+            "اسم الموظف (هدف)":        r.hadaf_name or "",
+            "الآيبان":                  r.iban or "",
+            "المبلغ المحوَّل (البنك)":  r.bank_amount,
+            "مبلغ هدف":                r.hadaf_support_amount or "",
+            "الفرق":                    r.amount_diff if r.amount_diff is not None else "",
+            "الحالة":                   ExcelWriter._status_label(r.status),
+            "الثقة %":                  f"{r.confidence:.0f}%" if r.confidence else "",
+        } for r in result.bank_report])
+        st.dataframe(df, use_container_width=True, hide_index=True)
 
     with tab_matched:
         if result.matched:
-            import pandas as pd
-
-            df = pd.DataFrame(
-                [
-                    {
-                        "الرقم التسلسلي": r.hadaf_serial,
-                        "اسم هدف": r.hadaf_name,
-                        "اسم البنك": r.bank_name,
-                        "الآيبان": r.iban or "",
-                        "المبلغ": f"{r.amount:,.2f}",
-                        "طريقة المطابقة": r.match_method,
-                        "الثقة %": f"{r.confidence:.1f}%",
-                    }
-                    for r in result.matched
-                ]
-            )
+            df = pd.DataFrame([{
+                "الرقم التسلسلي": r.hadaf_serial,
+                "اسم هدف":        r.hadaf_name,
+                "اسم البنك":      r.bank_name,
+                "المبلغ (البنك)": r.bank_amount,
+                "مبلغ هدف":      r.hadaf_support_amount or "",
+                "الفرق":          r.amount_diff if r.amount_diff is not None else "",
+                "طريقة المطابقة": r.match_method,
+                "الثقة %":        f"{r.confidence:.1f}%",
+            } for r in result.matched])
             st.dataframe(df, use_container_width=True, hide_index=True)
         else:
             st.info("لا توجد مطابقات ناجحة")
 
     with tab_review:
         if result.review:
-            import pandas as pd
-
-            df = pd.DataFrame(
-                [
-                    {
-                        "اسم البنك": r.bank_name,
-                        "الاسم المقترح (هدف)": r.hadaf_name,
-                        "الرقم التسلسلي المقترح": r.hadaf_serial,
-                        "الآيبان": r.iban or "",
-                        "المبلغ": f"{r.amount:,.2f}",
-                        "طريقة المطابقة": r.match_method,
-                        "الثقة %": f"{r.confidence:.1f}%",
-                    }
-                    for r in result.review
-                ]
-            )
+            df = pd.DataFrame([{
+                "اسم البنك":             r.bank_name,
+                "الاسم المقترح (هدف)":  r.hadaf_name,
+                "الرقم التسلسلي":       r.hadaf_serial,
+                "المبلغ (البنك)":       r.bank_amount,
+                "مبلغ هدف":             r.hadaf_support_amount or "",
+                "طريقة المطابقة":       r.match_method,
+                "الثقة %":              f"{r.confidence:.1f}%",
+            } for r in result.review])
             st.dataframe(df, use_container_width=True, hide_index=True)
         else:
-            st.info("لا توجد سجلات تحتاج مراجعة")
+            st.success("لا توجد سجلات تحتاج مراجعة")
 
     with tab_unmatched:
         if result.unmatched_bank:
-            import pandas as pd
-
-            df = pd.DataFrame(
-                [
-                    {
-                        "اسم البنك": e.name,
-                        "الآيبان": e.iban or "",
-                        "المبلغ": f"{e.amount:,.2f}",
-                        "رقم المرجع": e.reference or "",
-                    }
-                    for e in result.unmatched_bank
-                ]
-            )
+            df = pd.DataFrame([{
+                "اسم البنك":   e.name,
+                "الآيبان":    e.iban or "",
+                "المبلغ":     e.amount,
+                "رقم المرجع": e.reference or "",
+            } for e in result.unmatched_bank])
             st.dataframe(df, use_container_width=True, hide_index=True)
         else:
             st.success("جميع سجلات البنك تم مطابقتها!")
 
-    # ---------------------------------------------------------------------------
-    # Download section
-    # ---------------------------------------------------------------------------
+    with tab_hadaf_only:
+        if result.unmatched_hadaf:
+            df = pd.DataFrame([{
+                "الرقم التسلسلي": e.serial,
+                "اسم الموظف":     e.name_arabic,
+                "رقم الهوية":     e.national_id or "",
+                "الآيبان":        e.iban or "",
+                "مبلغ هدف":      e.support_amount or "",
+            } for e in result.unmatched_hadaf])
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        else:
+            st.success("جميع موظفي هدف موجودون في ملف البنك")
+
+    # ── Downloads ────────────────────────────────────────────────────────
     st.markdown("---")
     st.markdown("## 📥 تحميل التقارير")
 
-    excel_writer = ExcelWriter()
+    writer = ExcelWriter()
+    d1, d2, d3, d4, d5 = st.columns(5)
 
-    dl_col1, dl_col2, dl_col3, dl_col4 = st.columns(4)
-
-    with dl_col1:
-        matched_bytes = excel_writer.build_matched_excel(result.matched)
+    with d1:
         st.download_button(
-            label="📗 تحميل المطابقات",
-            data=matched_bytes,
+            "📊 تقرير البنك المُحدَّث",
+            data=writer.build_bank_report_excel(result.bank_report),
+            file_name="bank_report_updated.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            help="جميع سجلات البنك مع الرقم التسلسلي لهدف",
+        )
+    with d2:
+        st.download_button(
+            "📗 المطابقات",
+            data=writer.build_matched_excel(result.matched),
             file_name="matched.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
-
-    with dl_col2:
-        review_bytes = excel_writer.build_review_excel(result.review)
+    with d3:
         st.download_button(
-            label="📙 تحميل المراجعة",
-            data=review_bytes,
+            "📙 المراجعة",
+            data=writer.build_review_excel(result.review),
             file_name="review.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
-
-    with dl_col3:
-        unmatched_bytes = excel_writer.build_unmatched_excel(result.unmatched_bank)
+    with d4:
         st.download_button(
-            label="📕 تحميل غير المطابق",
-            data=unmatched_bytes,
+            "📕 غير مطابق",
+            data=writer.build_unmatched_excel(result.unmatched_bank),
             file_name="unmatched.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
-
-    with dl_col4:
-        summary_bytes = excel_writer.build_summary_excel(
-            summary=result.summary,
-            hadaf_employees=hadaf_employees,
-            bank_employees=bank_employees,
-            matched=result.matched,
-            review=result.review,
-            unmatched_bank=result.unmatched_bank,
-        )
+    with d5:
         st.download_button(
-            label="📘 تحميل الملخص",
-            data=summary_bytes,
+            "📘 الملخص",
+            data=writer.build_summary_excel(s, result.matched, result.review),
             file_name="summary.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
 
 elif hadaf_file is None or bank_file is None:
-    st.info("👆 يرجى رفع كلا الملفين للبدء في عملية المطابقة")
+    st.info("👆 ارفع كلا الملفين للبدء")
