@@ -28,11 +28,8 @@ logger = get_logger(__name__)
 _IBAN_RE      = re.compile(r"SA\d{22}")
 _OVERLAY_X0   = 548.0   # right of the existing "م" column
 _OVERLAY_X1   = 590.0
-_HDR_COLOR    = (0.12, 0.31, 0.47)   # #1F4E79 dark blue
-_MATCH_COLOR  = (0.44, 0.68, 0.28)   # #70AD47 green
-_FONT         = "helv"               # built-in Helvetica (no Arabic needed — numbers only)
-_FONT_SIZE    = 8.0
-_HDR_SIZE     = 7.5
+_FONT         = "helv"  # built-in Helvetica (numbers only — no Arabic needed)
+_TEXT_COLOR   = (0.78, 0.0, 0.0)   # red — distinguishes the added Hadaf serial
 
 
 class PDFOverlayWriter:
@@ -81,103 +78,54 @@ class PDFOverlayWriter:
         """
         Scan the page for IBAN text, match with Hadaf data, overlay serial.
         Returns the number of serials overlaid on this page.
+        Plain text only — no header, no colours, no boxes.
         """
         # Extract all words with their bounding boxes
         words = page.get_text("words")   # (x0, y0, x1, y1, text, ...)
 
-        # Collect IBAN words on this page
-        iban_rows: list[tuple[float, float, str]] = []   # (y_mid, x0, iban)
+        # Collect IBAN words on this page with the row's font height
+        iban_rows: list[tuple[float, float, str]] = []   # (y_mid, row_height, iban)
         for w in words:
             x0, y0, x1, y1, text = w[0], w[1], w[2], w[3], w[4]
             if _IBAN_RE.fullmatch(text.strip()):
                 y_mid = (y0 + y1) / 2
-                iban_rows.append((y_mid, x0, text.strip()))
+                row_h = y1 - y0
+                iban_rows.append((y_mid, row_h, text.strip()))
 
         if not iban_rows:
             return 0
 
-        # Sort top-to-bottom
-        iban_rows.sort(key=lambda r: r[0])
-
-        # Detect header rows to add column header "هدف#" above first data row
-        # We add it once per table section (when we see the first IBAN row
-        # following the column headers "م"/"S")
-        header_y_positions = set()
-        for w in words:
-            text = w[4].strip()
-            if text in ("S", "ﻡ", "م"):
-                header_y_positions.add(round(w[1], 1))   # y0 of "S"/"م" header
-
         overlaid = 0
-        header_drawn: set[float] = set()
-
-        for y_mid, x0, iban in iban_rows:
+        for y_mid, row_h, iban in iban_rows:
             serial = hadaf_by_iban.get(iban.upper())
-
-            # Draw column header "هدف" the first time we see an IBAN row
-            # below a known header row
-            for hy in header_y_positions:
-                if y_mid > hy and round(hy, 0) not in header_drawn:
-                    self._draw_header(page, hy)
-                    header_drawn.add(round(hy, 0))
-
             if serial is None:
-                # Draw a thin placeholder so the column is visually complete
-                self._draw_cell(page, y_mid, text="", matched=False)
-            else:
-                self._draw_cell(page, y_mid, text=str(serial), matched=True)
-                overlaid += 1
+                continue
+            self._draw_serial(page, y_mid, row_h, str(serial))
+            overlaid += 1
 
         return overlaid
 
-    # ── Drawing helpers ───────────────────────────────────────────────────────
+    # ── Drawing helper ──────────────────────────────────────────────────────
 
-    def _draw_header(self, page: fitz.Page, header_y: float) -> None:
-        """Draw the 'هدف#' column header at header_y in the right margin."""
-        # Two-line header like the existing ones
-        rect_ar = fitz.Rect(_OVERLAY_X0, header_y, _OVERLAY_X1, header_y + 10)
-        rect_en = fitz.Rect(_OVERLAY_X0, header_y + 10, _OVERLAY_X1, header_y + 20)
-
-        # Blue background
-        page.draw_rect(
-            fitz.Rect(_OVERLAY_X0, header_y, _OVERLAY_X1, header_y + 20),
-            color=None, fill=_HDR_COLOR,
-        )
-        page.insert_text(
-            rect_ar.tl + fitz.Point(2, 8),
-            "رقم هدف",
-            fontname=_FONT, fontsize=_HDR_SIZE - 1,
-            color=(1, 1, 1),
-        )
-        page.insert_text(
-            rect_en.tl + fitz.Point(2, 7),
-            "Hadaf#",
-            fontname=_FONT, fontsize=_HDR_SIZE - 1,
-            color=(1, 1, 1),
-        )
-
-    def _draw_cell(
+    def _draw_serial(
         self,
         page: fitz.Page,
         y_mid: float,
+        row_h: float,
         text: str,
-        matched: bool,
     ) -> None:
-        """Draw the Hadaf serial cell in the right margin at vertical position y_mid."""
-        cell_h = 8.0
-        y0 = y_mid - cell_h / 2
-        y1 = y_mid + cell_h / 2
-        rect = fitz.Rect(_OVERLAY_X0, y0, _OVERLAY_X1, y1)
-
-        if matched:
-            # Green background for matched rows
-            page.draw_rect(rect, color=None, fill=_MATCH_COLOR)
-            page.insert_text(
-                fitz.Point(_OVERLAY_X0 + 2, y_mid + 3),
-                text,
-                fontname=_FONT, fontsize=_FONT_SIZE,
-                color=(1, 1, 1),
-            )
-        else:
-            # Light grey border for unmatched rows — no text
-            page.draw_rect(rect, color=(0.8, 0.8, 0.8), fill=(0.97, 0.97, 0.97), width=0.3)
+        """
+        Overlay the Hadaf serial as plain black text in the right margin,
+        font size scaled to the row height, vertically centred — matching
+        the look of the existing row text. No header, no colour, no box.
+        """
+        # Scale the font to the row height (existing rows ≈ 8pt for ~8px height)
+        font_size = max(6.0, min(9.0, row_h))
+        # Baseline ≈ vertical centre + ~⅓ of font size
+        baseline_y = y_mid + font_size * 0.35
+        page.insert_text(
+            fitz.Point(_OVERLAY_X0 + 2, baseline_y),
+            text,
+            fontname=_FONT, fontsize=font_size,
+            color=_TEXT_COLOR,
+        )
