@@ -180,62 +180,50 @@ if "result" in st.session_state:
 
     st.markdown("---")
 
-    # ---- Tabs ----
-    tab_bank, tab_matched, tab_review, tab_unmatched, tab_hadaf_only = st.tabs([
-        "📄 تقرير البنك الكامل",
-        "✅ المطابقات",
-        "⚠️ تحتاج مراجعة",
-        "❌ غير مطابق",
-        "📋 هدف غير موجود بالبنك",
-    ])
-
     import pandas as pd
 
-    with tab_bank:
-        st.caption("جميع سجلات البنك مع الرقم التسلسلي لهدف لكل موظف مطابق")
-        df = pd.DataFrame([{
-            "اسم الموظف (البنك)":      r.bank_name,
-            "الرقم التسلسلي (هدف)":    r.hadaf_serial or "",
-            "اسم الموظف (هدف)":        r.hadaf_name or "",
-            "الآيبان":                  r.iban or "",
-            "المبلغ المحوَّل (البنك)":  r.bank_amount,
-            "مبلغ هدف":                r.hadaf_support_amount or "",
-            "الفرق":                    r.amount_diff if r.amount_diff is not None else "",
-            "الحالة":                   ExcelWriter._status_label(r.status),
-            "الثقة %":                  f"{r.confidence:.0f}%" if r.confidence else "",
-        } for r in result.bank_report])
-        st.dataframe(df, use_container_width=True, hide_index=True)
+    # ---- الجدول الرئيسي: كشف البنك مع رقم هدف أولاً ----
+    st.markdown("### 📄 كشف الرواتب المُحدَّث")
+    st.caption("رقم هدف أول عمود — أخضر: مطابق تام | أصفر: يحتاج مراجعة | أحمر: غير مطابق")
 
-    with tab_matched:
-        if result.matched:
-            df = pd.DataFrame([{
-                "الرقم التسلسلي": r.hadaf_serial,
-                "اسم هدف":        r.hadaf_name,
-                "اسم البنك":      r.bank_name,
-                "المبلغ (البنك)": r.bank_amount,
-                "مبلغ هدف":      r.hadaf_support_amount or "",
-                "الفرق":          r.amount_diff if r.amount_diff is not None else "",
-                "طريقة المطابقة": r.match_method,
-                "الثقة %":        f"{r.confidence:.1f}%",
-            } for r in result.matched])
-            st.dataframe(df, use_container_width=True, hide_index=True)
-        else:
-            st.info("لا توجد مطابقات ناجحة")
+    def _row_color(status):
+        return {"matched": "🟢", "review": "🟡", "bank_only": "🔴"}.get(status, "⚪")
+
+    df_main = pd.DataFrame([{
+        "رقم هدف": (
+            str(r.hadaf_serial) if r.status == "matched"
+            else (f"{r.hadaf_serial}؟" if r.status == "review" else "—")
+        ),
+        "اسم الموظف": r.bank_name,
+        "الآيبان": r.iban or "",
+        "المبلغ": r.bank_amount,
+        "رقم المرجع": r.reference or "",
+        "الحالة": _row_color(r.status),
+    } for r in result.bank_report])
+    st.dataframe(df_main, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+
+    # ---- تفاصيل إضافية في tabs ----
+    tab_review, tab_unmatched, tab_hadaf_only = st.tabs([
+        "⚠️ يحتاج مراجعة بشرية",
+        "❌ غير مطابق من البنك",
+        "📋 موظفو هدف لم ينزل راتبهم",
+    ])
 
     with tab_review:
         if result.review:
             df = pd.DataFrame([{
-                "اسم البنك":             r.bank_name,
-                "الاسم المقترح (هدف)":  r.hadaf_name,
-                "الرقم التسلسلي":       r.hadaf_serial,
-                "المبلغ (البنك)":       r.bank_amount,
-                "مبلغ هدف":             r.hadaf_support_amount or "",
-                "طريقة المطابقة":       r.match_method,
-                "الثقة %":              f"{r.confidence:.1f}%",
+                "اسم البنك":            r.bank_name,
+                "الاسم المقترح (هدف)": r.hadaf_name,
+                "رقم هدف المقترح":     r.hadaf_serial,
+                "المبلغ (البنك)":      r.bank_amount,
+                "طريقة المطابقة":      r.match_method,
+                "الثقة %":             f"{r.confidence:.1f}%",
             } for r in result.review])
             st.dataframe(df, use_container_width=True, hide_index=True)
         else:
-            st.success("لا توجد سجلات تحتاج مراجعة")
+            st.success("لا توجد سجلات تحتاج مراجعة ✅")
 
     with tab_unmatched:
         if result.unmatched_bank:
@@ -247,54 +235,50 @@ if "result" in st.session_state:
             } for e in result.unmatched_bank])
             st.dataframe(df, use_container_width=True, hide_index=True)
         else:
-            st.success("جميع سجلات البنك تم مطابقتها!")
+            st.success("جميع سجلات البنك تم مطابقتها ✅")
 
     with tab_hadaf_only:
         if result.unmatched_hadaf:
             df = pd.DataFrame([{
-                "الرقم التسلسلي": e.serial,
-                "اسم الموظف":     e.name_arabic,
-                "رقم الهوية":     e.national_id or "",
-                "الآيبان":        e.iban or "",
-                "مبلغ هدف":      e.support_amount or "",
+                "رقم هدف":     e.serial,
+                "اسم الموظف":  e.name_arabic,
+                "رقم الهوية":  e.national_id or "",
+                "الآيبان":     e.iban or "",
             } for e in result.unmatched_hadaf])
             st.dataframe(df, use_container_width=True, hide_index=True)
         else:
-            st.success("جميع موظفي هدف موجودون في ملف البنك")
+            st.success("جميع موظفي هدف موجودون في ملف البنك ✅")
 
     # ── Downloads ────────────────────────────────────────────────────────
     st.markdown("---")
     st.markdown("## 📥 تحميل التقارير")
 
     writer = ExcelWriter()
-    d1, d2, d3, d4, d5 = st.columns(5)
 
+    # الزر الرئيسي — أبرز وأكبر
+    st.markdown("### ⬇️ تحميل الكشف المُحدَّث")
+    bank_report_bytes = writer.build_bank_report_excel(result.bank_report)
+    st.download_button(
+        label="📊 تحميل كشف البنك + رقم هدف  (Excel)",
+        data=bank_report_bytes,
+        file_name="كشف_الرواتب_مع_رقم_هدف.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+        type="primary",
+        help="نفس بيانات البنك مع إضافة رقم هدف التسلسلي كأول عمود",
+    )
+
+    st.markdown("**تقارير إضافية:**")
+    d1, d2, d3 = st.columns(3)
     with d1:
         st.download_button(
-            "📊 تقرير البنك المُحدَّث",
-            data=writer.build_bank_report_excel(result.bank_report),
-            file_name="bank_report_updated.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-            help="جميع سجلات البنك مع الرقم التسلسلي لهدف",
-        )
-    with d2:
-        st.download_button(
-            "📗 المطابقات",
-            data=writer.build_matched_excel(result.matched),
-            file_name="matched.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
-    with d3:
-        st.download_button(
-            "📙 المراجعة",
+            "📙 يحتاج مراجعة",
             data=writer.build_review_excel(result.review),
             file_name="review.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
-    with d4:
+    with d2:
         st.download_button(
             "📕 غير مطابق",
             data=writer.build_unmatched_excel(result.unmatched_bank),
@@ -302,7 +286,7 @@ if "result" in st.session_state:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
-    with d5:
+    with d3:
         st.download_button(
             "📘 الملخص",
             data=writer.build_summary_excel(s, result.matched, result.review),

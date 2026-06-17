@@ -56,32 +56,27 @@ def _to_bytes(wb: Workbook) -> bytes:
 class ExcelWriter:
 
     # ------------------------------------------------------------------ #
-    #  تقرير البنك المُحدَّث — الأهم                                      #
+    #  تقرير البنك المُحدَّث — الهدف الأساسي                             #
+    #  الرقم التسلسلي هدف كأول عمود، ثم بيانات البنك كما هي             #
     # ------------------------------------------------------------------ #
     def build_bank_report_excel(self, rows: list[BankReportRow]) -> bytes:
         """
-        تقرير البنك الكامل:
-        - كل سجلات البنك
-        - مع الرقم التسلسلي لهدف لكل موظف مطابق
-        - مقارنة المبالغ
-        ملوّن حسب الحالة: أخضر=مطابق، أصفر=مراجعة، أحمر=غير مطابق
+        ملف البنك مُحدَّث:
+        - العمود الأول: رقم هدف التسلسلي (فارغ إذا لم يُطابَق)
+        - باقي الأعمدة: بيانات البنك الأصلية
+        - ألوان: أخضر=مطابق، أصفر=يحتاج مراجعة، أحمر=غير مطابق
         """
         wb = Workbook()
         wb.remove(wb.active)
-        ws = wb.create_sheet("تقرير البنك المُحدَّث")
+        ws = wb.create_sheet("كشف الرواتب المُحدَّث")
         ws.sheet_view.rightToLeft = True
 
+        # العمود الأول = رقم هدف، ثم بيانات البنك
         headers = [
-            "اسم الموظف (البنك)",
-            "الرقم التسلسلي (هدف)",
-            "اسم الموظف (هدف)",
+            "رقم هدف",          # ← العمود المُضاف
+            "اسم الموظف",
             "الآيبان",
-            "المبلغ المحوَّل (البنك)",
-            "مبلغ هدف",
-            "الفرق",
-            "طريقة المطابقة",
-            "نسبة الثقة %",
-            "الحالة",
+            "المبلغ",
             "رقم المرجع",
         ]
 
@@ -91,35 +86,86 @@ class ExcelWriter:
             "bank_only": _RED,
         }
 
-        for r_idx, row in enumerate([headers] + [None] * len(rows), start=1):
-            if r_idx == 1:
-                for c_idx, h in enumerate(headers, start=1):
-                    cell = ws.cell(row=1, column=c_idx, value=h)
-                    cell.font = Font(bold=True, color=_HEADER_FONT)
-                    cell.fill = PatternFill("solid", fgColor=_HEADER_BG)
-                    cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-            else:
-                brow = rows[r_idx - 2]
-                fill = PatternFill("solid", fgColor=status_fill.get(brow.status, "FFFFFF"))
-                values = [
-                    brow.bank_name,
-                    brow.hadaf_serial,
-                    brow.hadaf_name or "",
-                    brow.iban or "",
-                    brow.bank_amount,
-                    brow.hadaf_support_amount if brow.hadaf_support_amount is not None else "",
-                    brow.amount_diff if brow.amount_diff is not None else "",
-                    brow.match_method or "",
-                    f"{brow.confidence:.1f}%" if brow.confidence is not None else "",
-                    self._status_label(brow.status),
-                    brow.reference or "",
-                ]
-                for c_idx, val in enumerate(values, start=1):
-                    cell = ws.cell(row=r_idx, column=c_idx, value=val)
-                    cell.fill = fill
-                    cell.alignment = Alignment(horizontal="right", vertical="center")
+        # كتابة رأس الجدول
+        for c_idx, h in enumerate(headers, start=1):
+            cell = ws.cell(row=1, column=c_idx, value=h)
+            cell.font = Font(bold=True, color=_HEADER_FONT)
+            cell.fill = PatternFill("solid", fgColor=_HEADER_BG)
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
 
-        _col_widths(ws)
+        # كتابة البيانات — رقم هدف أولاً ثم باقي بيانات البنك
+        for r_idx, brow in enumerate(rows, start=2):
+            bg = PatternFill("solid", fgColor=status_fill.get(brow.status, "FFFFFF"))
+
+            # رقم هدف التسلسلي (فارغ إذا لم يُطابَق، مع علامة ؟ للمراجعة)
+            if brow.status == "matched":
+                hadaf_serial_display = brow.hadaf_serial
+            elif brow.status == "review":
+                hadaf_serial_display = f"{brow.hadaf_serial}؟"   # يحتاج تأكيد
+            else:
+                hadaf_serial_display = ""   # غير مطابق — فارغ
+
+            values = [
+                hadaf_serial_display,
+                brow.bank_name,
+                brow.iban or "",
+                brow.bank_amount,
+                brow.reference or "",
+            ]
+
+            for c_idx, val in enumerate(values, start=1):
+                cell = ws.cell(row=r_idx, column=c_idx, value=val)
+                cell.fill = bg
+                cell.alignment = Alignment(horizontal="right", vertical="center")
+
+        # تمييز عمود رقم هدف بلون مختلف للرأس
+        ws.cell(row=1, column=1).fill = PatternFill("solid", fgColor="1F4E79")
+        ws.cell(row=1, column=1).font = Font(bold=True, color="FFFFFF", size=12)
+
+        _col_widths(ws, mn=8, mx=35)
+        ws.column_dimensions["A"].width = 12  # عمود رقم هدف ثابت
+
+        # إضافة ورقة تفصيلية للمطابقة
+        ws2 = wb.create_sheet("تفاصيل المطابقة")
+        ws2.sheet_view.rightToLeft = True
+        detail_headers = [
+            "رقم هدف",
+            "اسم الموظف (هدف)",
+            "اسم الموظف (البنك)",
+            "الآيبان",
+            "المبلغ (البنك)",
+            "مبلغ هدف",
+            "الفرق",
+            "طريقة المطابقة",
+            "نسبة الثقة %",
+            "الحالة",
+        ]
+        for c_idx, h in enumerate(detail_headers, start=1):
+            cell = ws2.cell(row=1, column=c_idx, value=h)
+            cell.font = Font(bold=True, color=_HEADER_FONT)
+            cell.fill = PatternFill("solid", fgColor=_HEADER_BG)
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+        for r_idx, brow in enumerate(rows, start=2):
+            bg = PatternFill("solid", fgColor=status_fill.get(brow.status, "FFFFFF"))
+            detail_vals = [
+                brow.hadaf_serial or "",
+                brow.hadaf_name or "",
+                brow.bank_name,
+                brow.iban or "",
+                brow.bank_amount,
+                brow.hadaf_support_amount if brow.hadaf_support_amount is not None else "",
+                brow.amount_diff if brow.amount_diff is not None else "",
+                brow.match_method or "",
+                f"{brow.confidence:.1f}%" if brow.confidence is not None else "",
+                self._status_label(brow.status),
+            ]
+            for c_idx, val in enumerate(detail_vals, start=1):
+                cell = ws2.cell(row=r_idx, column=c_idx, value=val)
+                cell.fill = bg
+                cell.alignment = Alignment(horizontal="right", vertical="center")
+
+        _col_widths(ws2, mn=10, mx=40)
         return _to_bytes(wb)
 
     # ------------------------------------------------------------------ #
