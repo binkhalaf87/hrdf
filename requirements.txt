@@ -6,7 +6,9 @@ numpy>=1.26.4
 
 # PDF Processing
 pdfplumber>=0.10.3
-tabula-py>=2.9.0
+PyMuPDF>=1.24.0          # fitz — used by the PDF overlay (core feature)
+reportlab>=4.0.0         # styled PDF report generation
+tabula-py>=2.9.0         # optional fallback (needs Java; lazy-imported)
 
 # OCR (for scanned PDFs)
 pytesseract>=0.3.10

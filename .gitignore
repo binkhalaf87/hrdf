@@ -17,3 +17,16 @@ tests/sample_data/matched.xlsx
 tests/sample_data/review.xlsx
 tests/sample_data/unmatched.xlsx
 tests/sample_data/summary.xlsx
+
+# ── Real employee data — MUST NOT be committed (contains PII: IBAN, NID) ──
+# Ignore ALL data files in sample_data except the known synthetic samples.
+tests/sample_data/*.pdf
+tests/sample_data/*.xlsx
+!tests/sample_data/sample_bank.pdf
+!tests/sample_data/sample_hadaf.pdf
+
+# ── Generated output files (root) ──
+/*.pdf
+/*.xlsx
+~$*.xlsx
+_diag.py
