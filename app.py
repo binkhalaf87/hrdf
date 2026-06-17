@@ -14,6 +14,7 @@ from parser.bank_raw_extractor import BankRawExtractor
 from reports.excel_writer import ExcelWriter
 from reports.pdf_writer import PDFWriter
 from reports.bank_style_pdf import BankStylePDFWriter
+from reports.pdf_overlay import PDFOverlayWriter
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -291,17 +292,13 @@ if "result" in st.session_state:
     # ── الزر الرئيسي: PDF ────────────────────────────────────────────────
     st.markdown("### ⬇️ تحميل الكشف المُحدَّث")
 
-    with st.spinner("جاري توليد ملف PDF..."):
-        if is_excel_mode and bank_raw and hadaf_by_iban_for_pdf:
-            # Bank-style PDF: reproduces the bank report layout with Hadaf serial added
-            pdf_bytes = BankStylePDFWriter().build(
-                bank_raw,
-                hadaf_by_iban_for_pdf,
-            )
-            pdf_label = "🖨️ تحميل كشف البنك PDF (نفس التنسيق + رقم هدف)"
-            pdf_help  = "نفس بيانات ملف البنك الأصلي — رقم هدف العمود الأول، ثم م، اسم الموظف، المرجع، الآيبان، البنك، المبلغ"
+    with st.spinner("جاري تعديل ملف البنك الأصلي بإضافة رقم هدف..."):
+        if is_excel_mode and hadaf_by_iban_for_pdf:
+            # Overlay mode: original PDF + Hadaf serial in right margin
+            pdf_bytes = PDFOverlayWriter().overlay(bank_bytes, hadaf_by_iban_for_pdf)
+            pdf_label = "🖨️ تحميل ملف البنك الأصلي المعدَّل (رقم هدف مُضاف)"
+            pdf_help  = "نفس ملف البنك الأصلي بالضبط — رقم هدف مُضاف في الهامش الأيمن بجانب كل موظف"
         else:
-            # Standard summary PDF
             pdf_bytes = pdf_writer.build_bank_report_pdf(
                 result.bank_report,
                 title="كشف الرواتب المُحدَّث — برنامج هدف",
@@ -312,7 +309,7 @@ if "result" in st.session_state:
     st.download_button(
         label=pdf_label,
         data=pdf_bytes,
-        file_name="كشف_الرواتب_مع_رقم_هدف.pdf",
+        file_name="كشف_البنك_مع_رقم_هدف.pdf",
         mime="application/pdf",
         use_container_width=True,
         type="primary",
