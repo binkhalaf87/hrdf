@@ -10,8 +10,10 @@ from matcher.matching_engine import MatchingEngine
 from parser.bank_parser import BankParser
 from parser.hadaf_parser import HadafParser
 from parser.hadaf_excel_parser import HadafExcelParser
+from parser.bank_raw_extractor import BankRawExtractor
 from reports.excel_writer import ExcelWriter
 from reports.pdf_writer import PDFWriter
+from reports.bank_style_pdf import BankStylePDFWriter
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -123,11 +125,10 @@ if process_btn and hadaf_file and bank_file:
             if dbg.get("text_sample"):
                 st.code(dbg["text_sample"], language=None)
 
-    # Parse Hadaf
+    # ── Parse Hadaf ───────────────────────────────────────────────────────────
     with st.spinner("جاري استخراج بيانات ملف هدف..."):
         try:
             if is_excel:
-                import io as _io
                 hadaf_employees = HadafExcelParser().parse(hadaf_bytes)
             else:
                 hadaf_employees = HadafParser().parse(hadaf_bytes)
@@ -136,22 +137,19 @@ if process_btn and hadaf_file and bank_file:
             st.stop()
 
     if not hadaf_employees:
-        st.error("""
-⛔ **لم يتم العثور على موظفين في ملف هدف.**
-
-**أسباب محتملة:**
-- الملف محمي بكلمة مرور
-- تنسيق مختلف (جداول مدمجة أو نص غير منظم)
-- ملف ممسوح ضوئياً (يحتاج Tesseract OCR)
-
-**الحل:** فعّل خيار "عرض تشخيص PDF" من الشريط الجانبي لرؤية ما تم استخراجه.
-        """)
+        st.error("⛔ لم يتم العثور على موظفين في ملف هدف. فعّل التشخيص لمزيد من التفاصيل.")
         st.stop()
 
     st.success(f"✅ تم استخراج **{len(hadaf_employees)}** موظف من ملف هدف")
 
+    # ── Parse Bank PDF (raw extractor for Excel-mode, standard parser otherwise) ──
     with st.spinner("جاري استخراج بيانات ملف البنك..."):
         try:
+            if is_excel:
+                # Excel mode: use raw extractor that preserves ALL bank columns
+                bank_raw = BankRawExtractor().extract(bank_bytes)
+            else:
+                bank_raw = None
             bank_employees = bank_parser.parse(bank_bytes)
         except Exception as exc:
             st.error(f"فشل استخراج بيانات البنك: {exc}")
@@ -163,13 +161,23 @@ if process_btn and hadaf_file and bank_file:
 
     st.success(f"✅ تم استخراج **{len(bank_employees)}** سجل من ملف البنك")
 
+    # ── Match ─────────────────────────────────────────────────────────────────
     with st.spinner("جاري المطابقة..."):
         result = MatchingEngine().match(hadaf_employees, bank_employees)
+
+    # Build IBAN lookup for the bank-style PDF (Excel mode only)
+    hadaf_by_iban_for_pdf = (
+        {e.iban.upper(): e.serial for e in hadaf_employees if e.iban}
+        if is_excel else None
+    )
 
     st.session_state.update({
         "result": result,
         "hadaf_employees": hadaf_employees,
         "bank_employees": bank_employees,
+        "bank_raw": bank_raw,
+        "hadaf_by_iban_for_pdf": hadaf_by_iban_for_pdf,
+        "is_excel_mode": is_excel,
     })
 
 # ── Results ───────────────────────────────────────────────────────────────────
@@ -276,23 +284,39 @@ if "result" in st.session_state:
     writer     = ExcelWriter()
     pdf_writer = PDFWriter()
 
+    is_excel_mode        = st.session_state.get("is_excel_mode", False)
+    bank_raw             = st.session_state.get("bank_raw")
+    hadaf_by_iban_for_pdf = st.session_state.get("hadaf_by_iban_for_pdf")
+
     # ── الزر الرئيسي: PDF ────────────────────────────────────────────────
     st.markdown("### ⬇️ تحميل الكشف المُحدَّث")
 
     with st.spinner("جاري توليد ملف PDF..."):
-        pdf_bytes = pdf_writer.build_bank_report_pdf(
-            result.bank_report,
-            title="كشف الرواتب المُحدَّث — برنامج هدف",
-        )
+        if is_excel_mode and bank_raw and hadaf_by_iban_for_pdf:
+            # Bank-style PDF: reproduces the bank report layout with Hadaf serial added
+            pdf_bytes = BankStylePDFWriter().build(
+                bank_raw,
+                hadaf_by_iban_for_pdf,
+            )
+            pdf_label = "🖨️ تحميل كشف البنك PDF (نفس التنسيق + رقم هدف)"
+            pdf_help  = "نفس بيانات ملف البنك الأصلي — رقم هدف العمود الأول، ثم م، اسم الموظف، المرجع، الآيبان، البنك، المبلغ"
+        else:
+            # Standard summary PDF
+            pdf_bytes = pdf_writer.build_bank_report_pdf(
+                result.bank_report,
+                title="كشف الرواتب المُحدَّث — برنامج هدف",
+            )
+            pdf_label = "🖨️ تحميل كشف البنك PDF (رقم هدف كأول عمود)"
+            pdf_help  = "نفس بيانات البنك — رقم هدف التسلسلي العمود الأول، ثم اسم الموظف، الآيبان، المبلغ"
 
     st.download_button(
-        label="🖨️ تحميل كشف البنك PDF  (رقم هدف كأول عمود)",
+        label=pdf_label,
         data=pdf_bytes,
         file_name="كشف_الرواتب_مع_رقم_هدف.pdf",
         mime="application/pdf",
         use_container_width=True,
         type="primary",
-        help="نفس بيانات البنك — رقم هدف التسلسلي العمود الأول، ثم اسم الموظف، الآيبان، المبلغ",
+        help=pdf_help,
     )
 
     # ── تقارير ثانوية ────────────────────────────────────────────────────
