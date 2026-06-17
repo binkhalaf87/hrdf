@@ -30,6 +30,7 @@ _OVERLAY_X0   = 548.0   # right of the existing "م" column
 _OVERLAY_X1   = 590.0
 _FONT         = "helv"  # built-in Helvetica (numbers only — no Arabic needed)
 _TEXT_COLOR   = (0.78, 0.0, 0.0)   # red — distinguishes the added Hadaf serial
+_BORDER_COLOR = (0.0, 0.0, 0.0)    # thin black cell border (matches table grid)
 
 
 class PDFOverlayWriter:
@@ -98,16 +99,18 @@ class PDFOverlayWriter:
         overlaid = 0
         for y_mid, row_h, iban in iban_rows:
             serial = hadaf_by_iban.get(iban.upper())
-            if serial is None:
-                continue
-            self._draw_serial(page, y_mid, row_h, str(serial))
-            overlaid += 1
+            # Draw an empty bordered cell for EVERY row so the column appears
+            # on every page; add the red serial only when matched.
+            self._draw_cell(page, y_mid, row_h,
+                            text=str(serial) if serial is not None else "")
+            if serial is not None:
+                overlaid += 1
 
         return overlaid
 
     # ── Drawing helper ──────────────────────────────────────────────────────
 
-    def _draw_serial(
+    def _draw_cell(
         self,
         page: fitz.Page,
         y_mid: float,
@@ -115,17 +118,25 @@ class PDFOverlayWriter:
         text: str,
     ) -> None:
         """
-        Overlay the Hadaf serial as plain black text in the right margin,
-        font size scaled to the row height, vertically centred — matching
-        the look of the existing row text. No header, no colour, no box.
+        Draw an empty bordered cell in the right margin (border only — no fill),
+        and overlay the Hadaf serial as red text when matched. The cell height
+        matches the row, vertically centred to line up with the row text.
         """
-        # Scale the font to the row height (existing rows ≈ 8pt for ~8px height)
-        font_size = max(6.0, min(9.0, row_h))
-        # Baseline ≈ vertical centre + ~⅓ of font size
-        baseline_y = y_mid + font_size * 0.35
-        page.insert_text(
-            fitz.Point(_OVERLAY_X0 + 2, baseline_y),
-            text,
-            fontname=_FONT, fontsize=font_size,
-            color=_TEXT_COLOR,
+        # Cell rectangle — height matches the row, aligned to its vertical centre
+        cell_h = max(row_h, 8.0)
+        rect = fitz.Rect(
+            _OVERLAY_X0, y_mid - cell_h / 2,
+            _OVERLAY_X1, y_mid + cell_h / 2,
         )
+        # Border only — no fill (matches the table grid, thin black line)
+        page.draw_rect(rect, color=_BORDER_COLOR, fill=None, width=0.4)
+
+        if text:
+            font_size = max(6.0, min(9.0, row_h))
+            baseline_y = y_mid + font_size * 0.35
+            page.insert_text(
+                fitz.Point(_OVERLAY_X0 + 2, baseline_y),
+                text,
+                fontname=_FONT, fontsize=font_size,
+                color=_TEXT_COLOR,
+            )
