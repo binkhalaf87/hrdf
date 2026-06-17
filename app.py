@@ -319,7 +319,41 @@ if "result" in st.session_state:
         help=pdf_help,
     )
 
+    # ── Excel المطابقة بالآيبان (الزر الرئيسي الثاني) ───────────────────
+    if is_excel_mode and bank_raw and hadaf_by_iban_for_pdf:
+        st.markdown("---")
+        st.markdown("### 📥 Excel المطابقة بالآيبان")
+
+        hadaf_employees_list = st.session_state["hadaf_employees"]
+        hadaf_name_by_iban   = {e.iban.upper(): e.name_arabic
+                                 for e in hadaf_employees_list if e.iban}
+        hadaf_amount_by_iban = {e.iban.upper(): e.support_amount
+                                 for e in hadaf_employees_list
+                                 if e.iban and e.support_amount is not None}
+
+        with st.spinner("جاري توليد Excel..."):
+            excel_iban = writer.build_iban_matched_excel(
+                bank_raw,
+                hadaf_by_iban_for_pdf,
+                hadaf_name_by_iban,
+                hadaf_amount_by_iban,
+            )
+
+        matched_count = sum(
+            1 for r in bank_raw
+            if r.iban and r.iban.upper() in hadaf_by_iban_for_pdf
+        )
+        st.download_button(
+            label=f"📊 تحميل Excel المطابقة بالآيبان  ({matched_count} موظف مطابَق)",
+            data=excel_iban,
+            file_name="مطابقة_هدف_بالآيبان.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            type="primary",
+        )
+
     # ── تقارير ثانوية ────────────────────────────────────────────────────
+    st.markdown("---")
     st.markdown("**تقارير إضافية:**")
     d1, d2, d3, d4 = st.columns(4)
     with d1:

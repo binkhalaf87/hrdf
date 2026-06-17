@@ -8,6 +8,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils.dataframe import dataframe_to_rows
 
 from models import BankEmployee, BankReportRow, HadafEmployee, MatchResult, ProcessingSummary
+from parser.bank_raw_extractor import BankRawRecord
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -270,6 +271,127 @@ class ExcelWriter:
                   .groupby("method").size().reset_index(name="count"))
             df.columns = ["طريقة المطابقة", "العدد"]
             _write_df(ws2, df, fill=_BLUE)
+
+        return _to_bytes(wb)
+
+    # ------------------------------------------------------------------ #
+    #  Excel المطابقة بالآيبان — للنقل اليدوي                            #
+    #  يحتوي فقط على السجلات المطابَقة (IBAN هدف = رقم الحساب البنكي)   #
+    # ------------------------------------------------------------------ #
+    def build_iban_matched_excel(
+        self,
+        bank_records: list[BankRawRecord],
+        hadaf_by_iban: dict[str, int],          # IBAN.upper() → hadaf_serial
+        hadaf_name_by_iban: dict[str, str],     # IBAN.upper() → Arabic name
+        hadaf_amount_by_iban: dict[str, float], # IBAN.upper() → support amount
+    ) -> bytes:
+        """
+        ينتج ورقتين:
+          1. المطابَقون — السجلات التي تطابق فيها الآيبان فقط
+          2. غير المطابَقين — موظفو هدف الذين لم يُعثر على آيبانهم في البنك
+        """
+        wb = Workbook()
+        wb.remove(wb.active)
+
+        # ── ورقة 1: المطابَقون ────────────────────────────────────────────
+        ws = wb.create_sheet("مطابَق بالآيبان")
+        ws.sheet_view.rightToLeft = True
+
+        headers = [
+            "رقم هدف",          # A — العمود الأساسي المُضاف
+            "م (بنك)",          # B — رقم تسلسلي البنك
+            "اسم الموظف (هدف)", # C — الاسم العربي من ملف هدف
+            "اسم الموظف (بنك)", # D — الاسم الإنجليزي من البنك
+            "الآيبان",          # E
+            "رقم المرجع",       # F
+            "رمز البنك",        # G
+            "المبلغ (بنك)",     # H
+            "مبلغ هدف",         # I
+        ]
+
+        # Header row style
+        for c, h in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=c, value=h)
+            cell.font = Font(bold=True, color=_HEADER_FONT)
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+        # رأس عمود رقم هدف بلون مميز
+        ws.cell(row=1, column=1).fill = PatternFill("solid", fgColor="1F4E79")
+        # باقي الرأس
+        for c in range(2, len(headers) + 1):
+            ws.cell(row=1, column=c).fill = PatternFill("solid", fgColor=_HEADER_BG)
+
+        matched_rows = []
+        for rec in bank_records:
+            iban_up = rec.iban.upper() if rec.iban else ""
+            if iban_up not in hadaf_by_iban:
+                continue
+            matched_rows.append({
+                "hadaf_serial":  hadaf_by_iban[iban_up],
+                "bank_serial":   rec.bank_serial,
+                "hadaf_name":    hadaf_name_by_iban.get(iban_up, ""),
+                "bank_name":     rec.name,
+                "iban":          rec.iban,
+                "reference":     rec.reference,
+                "bank_code":     rec.bank_code,
+                "bank_amount":   rec.amount_str,
+                "hadaf_amount":  hadaf_amount_by_iban.get(iban_up, ""),
+            })
+
+        # Sort by Hadaf serial
+        matched_rows.sort(key=lambda x: x["hadaf_serial"])
+
+        fill_green = PatternFill("solid", fgColor=_GREEN)
+        for r, row in enumerate(matched_rows, 2):
+            vals = [
+                row["hadaf_serial"],
+                row["bank_serial"],
+                row["hadaf_name"],
+                row["bank_name"],
+                row["iban"],
+                row["reference"],
+                row["bank_code"],
+                row["bank_amount"],
+                row["hadaf_amount"] if row["hadaf_amount"] else "",
+            ]
+            for c, val in enumerate(vals, 1):
+                cell = ws.cell(row=r, column=c, value=val)
+                cell.fill = fill_green
+                cell.alignment = Alignment(horizontal="right", vertical="center")
+
+        _col_widths(ws, mn=10, mx=40)
+        ws.column_dimensions["A"].width = 12
+        ws.column_dimensions["E"].width = 28   # IBAN
+        ws.column_dimensions["F"].width = 20   # reference
+        ws.row_dimensions[1].height = 28
+
+        # ── ورقة 2: غير المطابَقين من هدف ───────────────────────────────
+        ws2 = wb.create_sheet("هدف بدون تطابق بنكي")
+        ws2.sheet_view.rightToLeft = True
+
+        bank_ibans = {rec.iban.upper() for rec in bank_records if rec.iban}
+        unmatched_hadaf = [
+            iban_up for iban_up in hadaf_by_iban
+            if iban_up not in bank_ibans
+        ]
+
+        h2 = ["رقم هدف", "اسم الموظف", "الآيبان"]
+        for c, h in enumerate(h2, 1):
+            cell = ws2.cell(row=1, column=c, value=h)
+            cell.font = Font(bold=True, color=_HEADER_FONT)
+            cell.fill = PatternFill("solid", fgColor=_HEADER_BG)
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+        fill_red = PatternFill("solid", fgColor=_RED)
+        for r, iban_up in enumerate(sorted(unmatched_hadaf,
+                                           key=lambda x: hadaf_by_iban[x]), 2):
+            vals = [hadaf_by_iban[iban_up], hadaf_name_by_iban.get(iban_up, ""), iban_up]
+            for c, val in enumerate(vals, 1):
+                cell = ws2.cell(row=r, column=c, value=val)
+                cell.fill = fill_red
+                cell.alignment = Alignment(horizontal="right", vertical="center")
+
+        _col_widths(ws2, mn=10, mx=35)
 
         return _to_bytes(wb)
 
