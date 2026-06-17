@@ -9,6 +9,7 @@ from matcher.matching_engine import MatchingEngine
 from parser.bank_parser import BankParser
 from parser.hadaf_parser import HadafParser
 from reports.excel_writer import ExcelWriter
+from reports.pdf_writer import PDFWriter
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -253,24 +254,40 @@ if "result" in st.session_state:
     st.markdown("---")
     st.markdown("## 📥 تحميل التقارير")
 
-    writer = ExcelWriter()
+    writer     = ExcelWriter()
+    pdf_writer = PDFWriter()
 
-    # الزر الرئيسي — أبرز وأكبر
+    # ── الزر الرئيسي: PDF ────────────────────────────────────────────────
     st.markdown("### ⬇️ تحميل الكشف المُحدَّث")
-    bank_report_bytes = writer.build_bank_report_excel(result.bank_report)
+
+    with st.spinner("جاري توليد ملف PDF..."):
+        pdf_bytes = pdf_writer.build_bank_report_pdf(
+            result.bank_report,
+            title="كشف الرواتب المُحدَّث — برنامج هدف",
+        )
+
     st.download_button(
-        label="📊 تحميل كشف البنك + رقم هدف  (Excel)",
-        data=bank_report_bytes,
-        file_name="كشف_الرواتب_مع_رقم_هدف.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        label="🖨️ تحميل كشف البنك PDF  (رقم هدف كأول عمود)",
+        data=pdf_bytes,
+        file_name="كشف_الرواتب_مع_رقم_هدف.pdf",
+        mime="application/pdf",
         use_container_width=True,
         type="primary",
-        help="نفس بيانات البنك مع إضافة رقم هدف التسلسلي كأول عمود",
+        help="نفس بيانات البنك — رقم هدف التسلسلي العمود الأول، ثم اسم الموظف، الآيبان، المبلغ",
     )
 
+    # ── تقارير ثانوية ────────────────────────────────────────────────────
     st.markdown("**تقارير إضافية:**")
-    d1, d2, d3 = st.columns(3)
+    d1, d2, d3, d4 = st.columns(4)
     with d1:
+        st.download_button(
+            "📊 Excel كامل",
+            data=writer.build_bank_report_excel(result.bank_report),
+            file_name="كشف_الرواتب_مع_رقم_هدف.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+        )
+    with d2:
         st.download_button(
             "📙 يحتاج مراجعة",
             data=writer.build_review_excel(result.review),
@@ -278,7 +295,7 @@ if "result" in st.session_state:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
-    with d2:
+    with d3:
         st.download_button(
             "📕 غير مطابق",
             data=writer.build_unmatched_excel(result.unmatched_bank),
@@ -286,7 +303,7 @@ if "result" in st.session_state:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
-    with d3:
+    with d4:
         st.download_button(
             "📘 الملخص",
             data=writer.build_summary_excel(s, result.matched, result.review),
