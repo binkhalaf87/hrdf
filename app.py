@@ -289,12 +289,11 @@ if "result" in st.session_state:
     bank_raw             = st.session_state.get("bank_raw")
     hadaf_by_iban_for_pdf = st.session_state.get("hadaf_by_iban_for_pdf")
 
-    # ── الزر الرئيسي: PDF ────────────────────────────────────────────────
+    # ── الزران الرئيسيان جنباً لجنب ────────────────────────────────────
     st.markdown("### ⬇️ تحميل الكشف المُحدَّث")
 
     with st.spinner("جاري تعديل ملف البنك الأصلي بإضافة رقم هدف..."):
         if is_excel_mode and hadaf_by_iban_for_pdf:
-            # Overlay mode: original PDF + Hadaf serial in right margin
             pdf_bytes = PDFOverlayWriter().overlay(bank_bytes, hadaf_by_iban_for_pdf)
             pdf_label = "🖨️ تحميل ملف البنك الأصلي المعدَّل (رقم هدف مُضاف)"
             pdf_help  = "نفس ملف البنك الأصلي بالضبط — رقم هدف مُضاف في الهامش الأيمن بجانب كل موظف"
@@ -306,15 +305,43 @@ if "result" in st.session_state:
             pdf_label = "🖨️ تحميل كشف البنك PDF (رقم هدف كأول عمود)"
             pdf_help  = "نفس بيانات البنك — رقم هدف التسلسلي العمود الأول، ثم اسم الموظف، الآيبان، المبلغ"
 
-    st.download_button(
-        label=pdf_label,
-        data=pdf_bytes,
-        file_name="كشف_البنك_مع_رقم_هدف.pdf",
-        mime="application/pdf",
-        use_container_width=True,
-        type="primary",
-        help=pdf_help,
-    )
+    # بناء مجموعة الأرقام التسلسلية للموظفين الموجودين في البنك
+    if is_excel_mode and hadaf_by_iban_for_pdf and bank_raw:
+        matched_serials_set = {
+            hadaf_by_iban_for_pdf[r.iban.upper()]
+            for r in bank_raw
+            if r.iban and r.iban.upper() in hadaf_by_iban_for_pdf
+        }
+    else:
+        matched_serials_set = {mr.hadaf_serial for mr in result.matched + result.review}
+
+    hadaf_employees_list = st.session_state.get("hadaf_employees", [])
+    with st.spinner("جاري بناء قائمة موظفي هدف..."):
+        excel_status_bytes = writer.build_hadaf_status_excel(
+            hadaf_employees_list, matched_serials_set
+        )
+
+    col_pdf, col_hadaf_xl = st.columns(2)
+    with col_pdf:
+        st.download_button(
+            label=pdf_label,
+            data=pdf_bytes,
+            file_name="كشف_البنك_مع_رقم_هدف.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+            type="primary",
+            help=pdf_help,
+        )
+    with col_hadaf_xl:
+        st.download_button(
+            label=f"📋 تحميل موظفو هدف مع حالة البنك ({len(hadaf_employees_list)} موظف)",
+            data=excel_status_bytes,
+            file_name="موظفو_هدف_حالة_البنك.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True,
+            type="primary",
+            help="قائمة كاملة لجميع موظفي هدف مع عمود يوضح هل نزل راتب كل موظف في البنك أم لا",
+        )
 
     # ── Excel المطابقة بالآيبان (الزر الرئيسي الثاني) ───────────────────
     if is_excel_mode and bank_raw and hadaf_by_iban_for_pdf:

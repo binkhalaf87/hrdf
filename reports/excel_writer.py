@@ -220,6 +220,50 @@ class ExcelWriter:
         } for e in employees])
         return self._single(df, "هدف غير موجود بالبنك", _ORANGE)
 
+    def build_hadaf_status_excel(
+        self,
+        employees: list[HadafEmployee],
+        matched_serials: set[int],
+    ) -> bytes:
+        """قائمة كاملة لموظفي هدف مع عمود حالة في البنك (مضاف/غير مضاف)."""
+        wb = Workbook()
+        wb.remove(wb.active)
+        ws = wb.create_sheet("موظفو هدف — حالة البنك")
+        ws.sheet_view.rightToLeft = True
+
+        headers = ["رقم هدف", "اسم الموظف", "رقم الهوية", "الآيبان", "مبلغ هدف", "حالة في البنك"]
+        for c, h in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=c, value=h)
+            cell.font = Font(bold=True, color=_HEADER_FONT)
+            cell.fill = PatternFill("solid", fgColor=_HEADER_BG)
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        ws.row_dimensions[1].height = 28
+
+        fill_green  = PatternFill("solid", fgColor=_GREEN)
+        fill_orange = PatternFill("solid", fgColor=_ORANGE)
+
+        for r, e in enumerate(sorted(employees, key=lambda x: x.serial), 2):
+            in_bank = e.serial in matched_serials
+            status  = "مضاف ✅" if in_bank else "غير مضاف ❌"
+            fill    = fill_green if in_bank else fill_orange
+            vals = [
+                e.serial,
+                e.name_arabic,
+                e.national_id or "",
+                e.iban or "",
+                e.support_amount if e.support_amount is not None else "",
+                status,
+            ]
+            for c, val in enumerate(vals, 1):
+                cell = ws.cell(row=r, column=c, value=val)
+                cell.fill = fill
+                cell.alignment = Alignment(horizontal="right", vertical="center")
+
+        _col_widths(ws, mn=10, mx=40)
+        ws.column_dimensions["D"].width = 28  # IBAN
+        ws.column_dimensions["F"].width = 16  # الحالة
+        return _to_bytes(wb)
+
     def build_summary_excel(
         self,
         summary: ProcessingSummary,
