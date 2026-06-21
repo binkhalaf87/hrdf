@@ -177,6 +177,7 @@ if process_btn and hadaf_file and bank_file:
         "hadaf_employees": hadaf_employees,
         "bank_employees": bank_employees,
         "bank_raw": bank_raw,
+        "bank_bytes": bank_bytes,
         "hadaf_by_iban_for_pdf": hadaf_by_iban_for_pdf,
         "is_excel_mode": is_excel,
     })
@@ -287,6 +288,7 @@ if "result" in st.session_state:
 
     is_excel_mode        = st.session_state.get("is_excel_mode", False)
     bank_raw             = st.session_state.get("bank_raw")
+    bank_bytes           = st.session_state.get("bank_bytes", b"")
     hadaf_by_iban_for_pdf = st.session_state.get("hadaf_by_iban_for_pdf")
 
     # ── الزران الرئيسيان جنباً لجنب ────────────────────────────────────
