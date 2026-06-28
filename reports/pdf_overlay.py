@@ -26,11 +26,12 @@ logger = get_logger(__name__)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 _IBAN_RE      = re.compile(r"SA\d{22}")
-_OVERLAY_X0   = 548.0   # right of the existing "م" column
-_OVERLAY_X1   = 590.0
+_OVERLAY_X0   = 560.0   # moved right to avoid overlap with "م" column
+_OVERLAY_X1   = 595.0   # right page margin
 _FONT         = "helv"  # built-in Helvetica (numbers only — no Arabic needed)
 _TEXT_COLOR   = (0.78, 0.0, 0.0)   # red — distinguishes the added Hadaf serial
 _BORDER_COLOR = (0.0, 0.0, 0.0)    # thin black cell border (matches table grid)
+_TEXT_PAD_R   = 2.0                 # padding from right edge for right-aligned text
 
 
 class PDFOverlayWriter:
@@ -130,8 +131,11 @@ class PDFOverlayWriter:
         if text:
             font_size = max(6.0, min(9.0, row_h))
             baseline_y = y_mid + font_size * 0.35
+            # right-align: calculate text width and insert from the right edge
+            text_w = fitz.get_text_length(text, fontname=_FONT, fontsize=font_size)
+            text_x = _OVERLAY_X1 - text_w - _TEXT_PAD_R
             page.insert_text(
-                fitz.Point(_OVERLAY_X0 + 2, baseline_y),
+                fitz.Point(text_x, baseline_y),
                 text,
                 fontname=_FONT, fontsize=font_size,
                 color=_TEXT_COLOR,
