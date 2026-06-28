@@ -43,7 +43,7 @@ class PDFOverlayWriter:
         self,
         pdf_bytes: bytes,
         hadaf_by_iban: dict[str, int],   # IBAN.upper() → hadaf_serial
-    ) -> bytes:
+    ) -> tuple[bytes, set[int]]:
         """
         Parameters
         ----------
@@ -52,22 +52,23 @@ class PDFOverlayWriter:
 
         Returns
         -------
-        Modified PDF bytes with Hadaf serials overlaid in the right margin.
+        (modified_pdf_bytes, matched_serials_set)
+        matched_serials_set — Hadaf serial numbers actually overlaid in the PDF.
         """
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        total_overlaid = 0
+        matched_serials: set[int] = set()
 
         for page_idx in range(len(doc)):
             page = doc[page_idx]
-            n = self._overlay_page(page, hadaf_by_iban)
-            total_overlaid += n
+            page_serials = self._overlay_page(page, hadaf_by_iban)
+            matched_serials.update(page_serials)
 
-        logger.info("PDFOverlayWriter: overlaid %d serial numbers", total_overlaid)
+        logger.info("PDFOverlayWriter: overlaid %d serial numbers", len(matched_serials))
 
         buf = BytesIO()
         doc.save(buf, garbage=4, deflate=True)
         doc.close()
-        return buf.getvalue()
+        return buf.getvalue(), matched_serials
 
     # ── Internal ──────────────────────────────────────────────────────────────
 
@@ -75,16 +76,13 @@ class PDFOverlayWriter:
         self,
         page: fitz.Page,
         hadaf_by_iban: dict[str, int],
-    ) -> int:
+    ) -> set[int]:
         """
         Scan the page for IBAN text, match with Hadaf data, overlay serial.
-        Returns the number of serials overlaid on this page.
-        Plain text only — no header, no colours, no boxes.
+        Returns the set of Hadaf serial numbers overlaid on this page.
         """
-        # Extract all words with their bounding boxes
         words = page.get_text("words")   # (x0, y0, x1, y1, text, ...)
 
-        # Collect IBAN words on this page with the row's font height
         iban_rows: list[tuple[float, float, str]] = []   # (y_mid, row_height, iban)
         for w in words:
             x0, y0, x1, y1, text = w[0], w[1], w[2], w[3], w[4]
@@ -94,19 +92,17 @@ class PDFOverlayWriter:
                 iban_rows.append((y_mid, row_h, text.strip()))
 
         if not iban_rows:
-            return 0
+            return set()
 
-        overlaid = 0
+        overlaid_serials: set[int] = set()
         for y_mid, row_h, iban in iban_rows:
             serial = hadaf_by_iban.get(iban.upper())
-            # Draw an empty bordered cell for EVERY row so the column appears
-            # on every page; add the red serial only when matched.
             self._draw_cell(page, y_mid, row_h,
                             text=str(serial) if serial is not None else "")
             if serial is not None:
-                overlaid += 1
+                overlaid_serials.add(serial)
 
-        return overlaid
+        return overlaid_serials
 
     # ── Drawing helper ──────────────────────────────────────────────────────
 

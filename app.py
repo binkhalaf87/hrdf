@@ -300,7 +300,9 @@ if "result" in st.session_state:
 
     with st.spinner("جاري تعديل ملف البنك الأصلي بإضافة رقم هدف..."):
         if is_excel_mode and hadaf_by_iban_for_pdf:
-            pdf_bytes = PDFOverlayWriter().overlay(bank_bytes, hadaf_by_iban_for_pdf)
+            pdf_bytes, matched_serials_set = PDFOverlayWriter().overlay(
+                bank_bytes, hadaf_by_iban_for_pdf
+            )
             pdf_label = "🖨️ تحميل ملف البنك الأصلي المعدَّل (رقم هدف مُضاف)"
             pdf_help  = "نفس ملف البنك الأصلي بالضبط — رقم هدف مُضاف في الهامش الأيمن بجانب كل موظف"
         else:
@@ -310,16 +312,7 @@ if "result" in st.session_state:
             )
             pdf_label = "🖨️ تحميل كشف البنك PDF (رقم هدف كأول عمود)"
             pdf_help  = "نفس بيانات البنك — رقم هدف التسلسلي العمود الأول، ثم اسم الموظف، الآيبان، المبلغ"
-
-    # بناء مجموعة الأرقام التسلسلية للموظفين الموجودين في البنك
-    if is_excel_mode and hadaf_by_iban_for_pdf and bank_raw:
-        matched_serials_set = {
-            hadaf_by_iban_for_pdf[r.iban.upper()]
-            for r in bank_raw
-            if r.iban and r.iban.upper() in hadaf_by_iban_for_pdf
-        }
-    else:
-        matched_serials_set = {mr.hadaf_serial for mr in result.matched + result.review}
+            matched_serials_set = {mr.hadaf_serial for mr in result.matched + result.review}
 
     hadaf_employees_list = st.session_state.get("hadaf_employees", [])
     with st.spinner("جاري بناء قائمة موظفي هدف..."):
