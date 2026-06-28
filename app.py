@@ -52,10 +52,13 @@ with st.sidebar:
 5. مطابقة ذكية (RapidFuzz)
 6. ترجمة عربي ↔ إنجليزي
 
-**حدود الثقة:**
+**حدود الثقة (مطابقة الأسماء):**
 - ✅ ≥ 95%: مطابق
 - ⚠️ 80–95%: يحتاج مراجعة
 - ❌ < 80%: غير مطابق
+
+**نسبة التغطية:**
+موظفو هدف الذين نزل راتبهم ÷ إجمالي موظفي هدف
 """)
     st.markdown("---")
     show_debug = st.checkbox("🔍 عرض تشخيص PDF", value=False)
@@ -193,12 +196,13 @@ if "result" in st.session_state:
 
     # ---- KPI cards ----
     c1, c2, c3, c4, c5, c6 = st.columns(6)
-    c1.metric("موظفو هدف 📋",        s.total_hadaf)
-    c2.metric("سجلات البنك 🏦",       s.total_bank)
-    c3.metric("مطابق ✅",             s.matched)
-    c4.metric("يحتاج مراجعة ⚠️",     s.review_required)
-    c5.metric("غير مطابق ❌",        s.unmatched)
-    c6.metric("نسبة النجاح 🎯",      f"{s.success_rate:.1f}%")
+    hadaf_matched_count = s.total_hadaf - s.hadaf_not_in_bank
+    c1.metric("موظفو هدف 📋",              s.total_hadaf)
+    c2.metric("سجلات البنك 🏦",             s.total_bank)
+    c3.metric("نزل راتبهم ✅",              hadaf_matched_count)
+    c4.metric("لم ينزل راتبهم ❌",          s.hadaf_not_in_bank)
+    c5.metric("بالبنك فقط (ليسوا في هدف)", s.unmatched)
+    c6.metric("نسبة تغطية هدف 🎯",         f"{s.success_rate:.1f}%")
 
     # ---- Hadaf-not-in-bank alert ----
     if s.hadaf_not_in_bank > 0:

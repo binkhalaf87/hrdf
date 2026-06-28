@@ -63,6 +63,8 @@ class ProcessingSummary:
 
     @property
     def success_rate(self) -> float:
-        if self.total_bank == 0:
+        """نسبة موظفي هدف الذين نزل راتبهم في البنك (مطابق / إجمالي هدف)"""
+        if self.total_hadaf == 0:
             return 0.0
-        return round(((self.matched) / self.total_bank) * 100, 2)
+        hadaf_matched = self.total_hadaf - self.hadaf_not_in_bank
+        return round((hadaf_matched / self.total_hadaf) * 100, 2)
