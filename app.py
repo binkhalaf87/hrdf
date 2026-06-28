@@ -298,9 +298,12 @@ if "result" in st.session_state:
     # ── الزران الرئيسيان جنباً لجنب ────────────────────────────────────
     st.markdown("### ⬇️ تحميل الكشف المُحدَّث")
 
+    # مجموعة الأرقام التسلسلية المطابَقة — دائماً من MatchingEngine ليتطابق مع KPI
+    matched_serials_set = {mr.hadaf_serial for mr in result.matched + result.review}
+
     with st.spinner("جاري تعديل ملف البنك الأصلي بإضافة رقم هدف..."):
         if is_excel_mode and hadaf_by_iban_for_pdf:
-            pdf_bytes, matched_serials_set = PDFOverlayWriter().overlay(
+            pdf_bytes, _ = PDFOverlayWriter().overlay(
                 bank_bytes, hadaf_by_iban_for_pdf
             )
             pdf_label = "🖨️ تحميل ملف البنك الأصلي المعدَّل (رقم هدف مُضاف)"
@@ -312,7 +315,6 @@ if "result" in st.session_state:
             )
             pdf_label = "🖨️ تحميل كشف البنك PDF (رقم هدف كأول عمود)"
             pdf_help  = "نفس بيانات البنك — رقم هدف التسلسلي العمود الأول، ثم اسم الموظف، الآيبان، المبلغ"
-            matched_serials_set = {mr.hadaf_serial for mr in result.matched + result.review}
 
     hadaf_employees_list = st.session_state.get("hadaf_employees", [])
     with st.spinner("جاري بناء قائمة موظفي هدف..."):
