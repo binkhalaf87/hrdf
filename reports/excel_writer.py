@@ -224,19 +224,28 @@ class ExcelWriter:
         self,
         employees: list[HadafEmployee],
         matched_serials: set[int],
+        bank_serial_by_hadaf: dict[int, str] | None = None,
     ) -> bytes:
-        """قائمة كاملة لموظفي هدف مع عمود حالة في البنك (مضاف/غير مضاف)."""
+        """قائمة كاملة لموظفي هدف مع عمود حالة في البنك ورقم م من كشف البنك."""
         wb = Workbook()
         wb.remove(wb.active)
         ws = wb.create_sheet("موظفو هدف — حالة البنك")
         ws.sheet_view.rightToLeft = True
 
+        has_bank_serial = bool(bank_serial_by_hadaf)
         headers = ["رقم هدف", "اسم الموظف", "رقم الهوية", "الآيبان", "مبلغ هدف", "حالة في البنك"]
+        if has_bank_serial:
+            headers.append("رقم م (البنك)")
+
         for c, h in enumerate(headers, 1):
             cell = ws.cell(row=1, column=c, value=h)
             cell.font = Font(bold=True, color=_HEADER_FONT)
             cell.fill = PatternFill("solid", fgColor=_HEADER_BG)
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        # تمييز عمود رقم م بلون مختلف
+        if has_bank_serial:
+            col_m = len(headers)
+            ws.cell(row=1, column=col_m).fill = PatternFill("solid", fgColor="1F4E79")
         ws.row_dimensions[1].height = 28
 
         fill_green  = PatternFill("solid", fgColor=_GREEN)
@@ -254,6 +263,8 @@ class ExcelWriter:
                 e.support_amount if e.support_amount is not None else "",
                 status,
             ]
+            if has_bank_serial:
+                vals.append(bank_serial_by_hadaf.get(e.serial, ""))
             for c, val in enumerate(vals, 1):
                 cell = ws.cell(row=r, column=c, value=val)
                 cell.fill = fill
@@ -262,6 +273,8 @@ class ExcelWriter:
         _col_widths(ws, mn=10, mx=40)
         ws.column_dimensions["D"].width = 28  # IBAN
         ws.column_dimensions["F"].width = 16  # الحالة
+        if has_bank_serial:
+            ws.column_dimensions[chr(ord("F") + 1)].width = 14  # رقم م
         return _to_bytes(wb)
 
     def build_summary_excel(
