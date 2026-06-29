@@ -235,7 +235,7 @@ class ExcelWriter:
         has_bank_serial = bool(bank_serial_by_hadaf)
         headers = ["رقم هدف", "اسم الموظف", "رقم الهوية", "الآيبان", "مبلغ هدف", "حالة في البنك"]
         if has_bank_serial:
-            headers.append("رقم م (البنك)")
+            headers.append("م / اسم الموظف في البنك")
 
         for c, h in enumerate(headers, 1):
             cell = ws.cell(row=1, column=c, value=h)
@@ -274,7 +274,7 @@ class ExcelWriter:
         ws.column_dimensions["D"].width = 28  # IBAN
         ws.column_dimensions["F"].width = 16  # الحالة
         if has_bank_serial:
-            ws.column_dimensions[chr(ord("F") + 1)].width = 14  # رقم م
+            ws.column_dimensions[chr(ord("F") + 1)].width = 30  # م / اسم البنك
         return _to_bytes(wb)
 
     def build_summary_excel(

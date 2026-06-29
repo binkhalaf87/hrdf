@@ -317,6 +317,8 @@ if "result" in st.session_state:
             pdf_help  = "نفس بيانات البنك — رقم هدف التسلسلي العمود الأول، ثم اسم الموظف، الآيبان، المبلغ"
 
     # بناء dict: hadaf_serial → رقم م في البنك (للتحقق العكسي)
+    # — مطابَق بالإيبان: يُكتب رقم م
+    # — مطابَق بالاسم/الهوية: يُكتب اسم الموظف في ملف البنك
     bank_serial_by_hadaf: dict[int, str] = {}
     if is_excel_mode and bank_raw and hadaf_by_iban_for_pdf:
         for rec in bank_raw:
@@ -333,6 +335,11 @@ if "result" in st.session_state:
         for mr in result.matched + result.review:
             if mr.iban and mr.iban.upper() in bank_serial_by_iban:
                 bank_serial_by_hadaf[mr.hadaf_serial] = bank_serial_by_iban[mr.iban.upper()]
+
+    # للموظفين المطابَقين بالاسم/الهوية (لا إيبان) — أضف اسم البنك بدلاً من رقم م
+    for mr in result.matched + result.review:
+        if mr.hadaf_serial not in bank_serial_by_hadaf and mr.bank_name:
+            bank_serial_by_hadaf[mr.hadaf_serial] = mr.bank_name
 
     hadaf_employees_list = st.session_state.get("hadaf_employees", [])
     with st.spinner("جاري بناء قائمة موظفي هدف..."):
