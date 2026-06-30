@@ -127,15 +127,40 @@ with col_b:
 
 st.markdown("<br>", unsafe_allow_html=True)
 
+_KEY_FILE = Path(__file__).parent / ".claude_api_key"
+
+def _load_saved_key() -> str:
+    try:
+        return _KEY_FILE.read_text().strip()
+    except Exception:
+        return ""
+
+def _save_key(key: str) -> None:
+    try:
+        _KEY_FILE.write_text(key.strip())
+    except Exception:
+        pass
+
+if "claude_api_key" not in st.session_state:
+    st.session_state["claude_api_key"] = _load_saved_key()
+
 with st.expander("🤖 إعدادات المطابقة الذكية بالذكاء الاصطناعي (اختياري)", expanded=False):
     st.caption("أدخل مفتاح Claude API لتفعيل مرحلة المطابقة الذكية للأسماء غير المتطابقة")
-    claude_api_key = st.text_input(
-        "مفتاح Claude API",
-        type="password",
-        placeholder="sk-ant-...",
-        key="claude_api_key",
-        label_visibility="collapsed",
-    )
+    col_key, col_btn = st.columns([4, 1])
+    with col_key:
+        claude_api_key = st.text_input(
+            "مفتاح Claude API",
+            type="password",
+            placeholder="sk-ant-...",
+            value=st.session_state["claude_api_key"],
+            key="claude_api_key_input",
+            label_visibility="collapsed",
+        )
+    with col_btn:
+        if st.button("💾 حفظ", use_container_width=True):
+            _save_key(claude_api_key)
+            st.session_state["claude_api_key"] = claude_api_key
+            st.success("✅ تم الحفظ")
     if claude_api_key:
         st.success("✅ سيتم تفعيل مطابقة الأسماء بالذكاء الاصطناعي (المرحلة 7)")
     else:
@@ -223,7 +248,7 @@ if process_btn and hadaf_file and bank_file:
     st.success(f"✅ تم استخراج **{len(bank_employees)}** سجل من ملف البنك")
 
     # ── Match ─────────────────────────────────────────────────────────────────
-    _claude_key = st.session_state.get("claude_api_key", "").strip() or None
+    _claude_key = (st.session_state.get("claude_api_key_input") or st.session_state.get("claude_api_key", "")).strip() or None
     with st.spinner("جاري المطابقة..."):
         result = MatchingEngine(claude_api_key=_claude_key).match(hadaf_employees, bank_employees)
 

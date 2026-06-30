@@ -30,3 +30,4 @@ tests/sample_data/*.xlsx
 /*.xlsx
 ~$*.xlsx
 _diag.py
+.claude_api_key
