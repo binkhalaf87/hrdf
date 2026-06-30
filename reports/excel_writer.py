@@ -293,6 +293,92 @@ class ExcelWriter:
             ws.column_dimensions["H"].width = 30  # م / اسم البنك
         return _to_bytes(wb)
 
+    def build_matched_hadaf_excel(
+        self,
+        matched_results: list[MatchResult],
+    ) -> bytes:
+        """
+        تقرير الموظفين المطابقين — بيانات هدف + بيانات البنك المقابلة.
+        صف واحد لكل موظف، لا خلايا فارغة.
+        """
+        wb = Workbook()
+        wb.remove(wb.active)
+        ws = wb.create_sheet("الموظفون المطابقون")
+        ws.sheet_view.rightToLeft = True
+
+        headers = [
+            "رقم هدف", "اسم الموظف (هدف)", "الآيبان",
+            "مبلغ هدف", "اسم الموظف (البنك)", "مبلغ البنك",
+            "الفرق", "طريقة المطابقة",
+        ]
+        fill_h = PatternFill("solid", fgColor=_HEADER_BG)
+        for c, h in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=c, value=h)
+            cell.font = Font(bold=True, color=_HEADER_FONT)
+            cell.fill = fill_h
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        ws.row_dimensions[1].height = 26
+
+        fill_g = PatternFill("solid", fgColor=_GREEN)
+        method_ar = self._METHOD_AR
+        for r, mr in enumerate(sorted(matched_results, key=lambda x: x.hadaf_serial), 2):
+            vals = [
+                mr.hadaf_serial,
+                mr.hadaf_name or "",
+                mr.iban or "",
+                mr.hadaf_support_amount if mr.hadaf_support_amount is not None else "",
+                mr.bank_name,
+                mr.bank_amount,
+                mr.amount_diff if mr.amount_diff is not None else "",
+                method_ar.get(mr.match_method, mr.match_method),
+            ]
+            for c, v in enumerate(vals, 1):
+                cell = ws.cell(row=r, column=c, value=v)
+                cell.fill = fill_g
+                cell.alignment = Alignment(horizontal="right", vertical="center")
+
+        _col_widths(ws, mn=10, mx=40)
+        ws.column_dimensions["C"].width = 28  # IBAN
+        return _to_bytes(wb)
+
+    def build_unmatched_hadaf_excel(
+        self,
+        employees: list[HadafEmployee],
+    ) -> bytes:
+        """تقرير الموظفين غير المطابقين — موظفو هدف بدون تطابق آيبان في البنك."""
+        wb = Workbook()
+        wb.remove(wb.active)
+        ws = wb.create_sheet("الموظفون غير المطابقين")
+        ws.sheet_view.rightToLeft = True
+
+        headers = ["رقم هدف", "اسم الموظف", "رقم الهوية", "الآيبان 1", "الآيبان 2", "الآيبان 3", "مبلغ هدف"]
+        fill_h = PatternFill("solid", fgColor=_HEADER_BG)
+        for c, h in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=c, value=h)
+            cell.font = Font(bold=True, color=_HEADER_FONT)
+            cell.fill = fill_h
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+        ws.row_dimensions[1].height = 26
+
+        fill_o = PatternFill("solid", fgColor=_ORANGE)
+        for r, e in enumerate(sorted(employees, key=lambda x: x.serial), 2):
+            vals = [
+                e.serial,
+                e.name_arabic,
+                e.national_id or "",
+                e.iban or "",
+                e.iban2 or "",
+                e.iban3 or "",
+                e.support_amount if e.support_amount is not None else "",
+            ]
+            for c, v in enumerate(vals, 1):
+                cell = ws.cell(row=r, column=c, value=v)
+                cell.fill = fill_o
+                cell.alignment = Alignment(horizontal="right", vertical="center")
+
+        _col_widths(ws, mn=10, mx=36)
+        return _to_bytes(wb)
+
     def build_summary_excel(
         self,
         summary: ProcessingSummary,

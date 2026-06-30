@@ -348,20 +348,22 @@ if "result" in st.session_state:
         for mr in result.matched + result.review
     }
 
-    # 2) الموظفون المطابقون  3) الموظفون غير المطابقين  (تقسيم حسب الآيبان)
-    matched_emps   = [e for e in hadaf_employees_list if e.serial in matched_serials_set]
+    # 2) الموظفون المطابقون — من نتائج المطابقة مباشرةً (لا خلايا فارغة)
+    matched_results = [
+        mr for mr in result.matched + result.review
+        if mr.match_method in ("iban", "claude_iban")
+    ]
+    # 3) الموظفون غير المطابقين — موظفو هدف الذين لم يُطابَق آيبانهم
     unmatched_emps = [e for e in hadaf_employees_list if e.serial not in matched_serials_set]
 
     with st.spinner("جاري بناء تقارير الموظفين..."):
-        excel_matched = writer.build_hadaf_status_excel(
-            matched_emps, matched_serials_set, bank_serial_by_hadaf, match_method_by_hadaf,
-        )
-        excel_unmatched = writer.build_hadaf_not_in_bank_excel(unmatched_emps)
+        excel_matched   = writer.build_matched_hadaf_excel(matched_results)
+        excel_unmatched = writer.build_unmatched_hadaf_excel(unmatched_emps)
 
     r1, r2, r3 = st.columns(3)
     with r1:
         st.download_button(
-            label=f"🏦 البنكي بعد التعديل",
+            label="🏦 البنكي بعد التعديل",
             data=pdf_bytes,
             file_name="البنك_بعد_التعديل.pdf",
             mime="application/pdf",
@@ -371,13 +373,13 @@ if "result" in st.session_state:
         )
     with r2:
         st.download_button(
-            label=f"✅ الموظفون المطابقون ({len(matched_emps)})",
+            label=f"✅ الموظفون المطابقون ({len(matched_results)})",
             data=excel_matched,
             file_name="الموظفون_المطابقون.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
             type="primary",
-            help="موظفو هدف الذين تطابق آيبانهم ونزل راتبهم في البنك",
+            help="موظفو هدف الذين تطابق آيبانهم مع البنك",
         )
     with r3:
         st.download_button(
