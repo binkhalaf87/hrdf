@@ -22,6 +22,12 @@ _AMOUNT_RE = re.compile(r"\b\d[\d,]*(?:\.\d{1,2})?\b")
 _NID_RE = re.compile(r"\b[12]\d{9}\b")
 _SERIAL_RE = re.compile(r"^\d{1,6}$")
 
+# تنسيق سطر البنك الدقيق:
+# SAR  6,766.67  SA...24...  BANKCODE  اسم الموظف  NID(10-16)  م
+_BANK_LINE_RE = re.compile(
+    r"SAR\s+([\d,]+\.\d{2})\s+(SA\d{22})\s+\S+\s+(.*?)\s+([12]\d{9,15})\s+(\d{1,6})\s*$"
+)
+
 _NAME_HEADERS = {
     "اسم", "الاسم", "موظف", "المستفيد", "مستفيد", "اسم الموظف", "اسم المستفيد",
     "name", "employee", "beneficiary", "account name", "account holder",
@@ -158,6 +164,31 @@ def _parse_table(table: list[list[str]]) -> list[BankEmployee]:
     return employees
 
 
+def _parse_from_text_structured(text: str) -> list[BankEmployee]:
+    """
+    استخراج دقيق باستخدام نمط السطر البنكي المعروف:
+    SAR <مبلغ> <SA+22رقم> <كود_البنك> <اسم> <هوية> <م>
+    """
+    employees: list[BankEmployee] = []
+    for line in text.splitlines():
+        m = _BANK_LINE_RE.search(line.strip())
+        if not m:
+            continue
+        amount_str, iban, name, nid, serial = m.group(1), m.group(2), m.group(3), m.group(4), m.group(5)
+        try:
+            amount = float(amount_str.replace(",", ""))
+        except ValueError:
+            amount = 0.0
+        employees.append(BankEmployee(
+            name=name.strip(),
+            iban=iban.upper(),
+            amount=amount,
+            national_id=nid if len(nid) == 10 else None,
+            serial=int(serial),
+        ))
+    return employees
+
+
 def _parse_from_text(text: str) -> list[BankEmployee]:
     """Line-by-line fallback for unstructured bank PDFs."""
     employees: list[BankEmployee] = []
@@ -235,15 +266,20 @@ class BankParser:
         if all_from_tables:
             return all_from_tables
 
-        # Text fallback
+        # Text fallback — أولاً النمط الدقيق ثم العام
         text = extract_text_pdfplumber(file_bytes)
-        employees = _parse_from_text(text)
-        logger.info("Bank: %d employees from text parsing", len(employees))
+        employees = _parse_from_text_structured(text)
+        logger.info("Bank: %d employees from structured text (SAR pattern)", len(employees))
+        if not employees:
+            employees = _parse_from_text(text)
+            logger.info("Bank: %d employees from generic text parsing", len(employees))
         return employees
 
     def _parse_scanned(self, file_bytes: bytes) -> list[BankEmployee]:
         text = ocr_pdf(file_bytes)
-        employees = _parse_from_text(text)
+        employees = _parse_from_text_structured(text)
+        if not employees:
+            employees = _parse_from_text(text)
         logger.info("Bank: %d employees via OCR", len(employees))
         return employees
 
