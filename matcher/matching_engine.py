@@ -72,10 +72,11 @@ class MatchingEngine:
         review: list[MatchResult] = []
         unmatched_bank: list[BankEmployee] = []
 
-        # Build lookup indices
-        hadaf_by_iban: dict[str, HadafEmployee] = {
-            e.iban.upper(): e for e in hadaf_employees if e.iban
-        }
+        # Build lookup indices — all 3 IBAN columns map to the same employee
+        hadaf_by_iban: dict[str, HadafEmployee] = {}
+        for e in hadaf_employees:
+            for iban in e.all_ibans:
+                hadaf_by_iban.setdefault(iban.upper(), e)
         hadaf_by_nid: dict[str, HadafEmployee] = {
             e.national_id: e for e in hadaf_employees if e.national_id
         }

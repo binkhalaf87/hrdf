@@ -8,8 +8,15 @@ class HadafEmployee:
     serial: int
     name_arabic: str
     national_id: Optional[str] = None
-    iban: Optional[str] = None           # مضاف — للمطابقة الدقيقة بالآيبان
+    iban: Optional[str] = None            # iban1 — الآيبان الأساسي
+    iban2: Optional[str] = None           # iban2 — آيبان بديل
+    iban3: Optional[str] = None           # iban3 — آيبان بديل
     support_amount: Optional[float] = None  # قيمة الدعم في هدف (للمقارنة)
+
+    @property
+    def all_ibans(self) -> list[str]:
+        """جميع الآيبانات غير الفارغة للموظف."""
+        return [i for i in (self.iban, self.iban2, self.iban3) if i]
 
 
 @dataclass

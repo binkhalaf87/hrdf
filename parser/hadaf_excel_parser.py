@@ -26,7 +26,9 @@ _COL_PATTERNS: dict[str, list[str]] = {
     "serial": ["تسلسل"],
     "name":   ["اسم الموظف", "اسم موظف"],   # exact phrase — avoids matching "حالموظف" in amount col
     "nid":    ["هوية"],
-    "iban":   ["ايبان", "آيبان", "iban"],
+    "iban":   ["iban1"],
+    "iban2":  ["iban2"],
+    "iban3":  ["iban3"],
     "amount": ["راتب", "مبلغ", "دعم", "إجمالي"],
 }
 
@@ -152,15 +154,19 @@ class HadafExcelParser:
             if not name:
                 continue
 
-            nid_raw  = row.get(mapping["nid"],    None) if "nid"    in mapping else None
-            iban_raw = row.get(mapping["iban"],   None) if "iban"   in mapping else None
-            amt_raw  = row.get(mapping["amount"], None) if "amount" in mapping else None
+            nid_raw   = row.get(mapping["nid"],    None) if "nid"    in mapping else None
+            iban_raw  = row.get(mapping["iban"],   None) if "iban"   in mapping else None
+            iban2_raw = row.get(mapping["iban2"],  None) if "iban2"  in mapping else None
+            iban3_raw = row.get(mapping["iban3"],  None) if "iban3"  in mapping else None
+            amt_raw   = row.get(mapping["amount"], None) if "amount" in mapping else None
 
             employees.append(HadafEmployee(
                 serial=serial,
                 name_arabic=name,
                 national_id=_clean_nid(nid_raw),
                 iban=_clean_iban(iban_raw),
+                iban2=_clean_iban(iban2_raw),
+                iban3=_clean_iban(iban3_raw),
                 support_amount=_clean_amount(amt_raw),
             ))
 
