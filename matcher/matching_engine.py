@@ -9,7 +9,7 @@ from utils.config import CONFIG
 from utils.logger import get_logger
 
 try:
-    from matcher.claude_matcher import ClaudeNameMatcher
+    from matcher.claude_matcher import ClaudeIbanMatcher
     _claude_available = True
 except ImportError:
     _claude_available = False
@@ -43,22 +43,21 @@ def _amount_diff(bank: float, hadaf: Optional[float]) -> Optional[float]:
 
 class MatchingEngine:
     """
-    6-stage matching pipeline:
+    Matching pipeline (IBAN is the only official match):
     Stage 1  — IBAN (Hadaf has IBAN)     → 100%
-    Stage 2  — National ID               → 100%
-    Stage 3  — Bank serial == Hadaf serial → 100%
-    Stage 4  — Arabic name exact (normalised) → 100%
-    Stage 5a — RapidFuzz fuzzy Arabic    → variable
-    Stage 5b — Arabic↔English transliteration → variable
-    Stage 6  — Claude AI name matching   → variable (optional, requires API key)
+    Stage 2  — National ID               → 100% (مرجعي)
+    Stage 3  — Bank serial == Hadaf serial → 100% (مرجعي)
+    Stage 4-5 — Name-based               → variable (مرجعي)
+    Stage 6  — Claude AI IBAN verification → يتحقق من آيبانات لم تتطابق نصياً
+               (أخطاء OCR)، ويُعدّ تطابق آيبان رسمي. (اختياري، يتطلب مفتاح API)
     """
 
     def __init__(self, claude_api_key: Optional[str] = None):
-        self._claude: Optional[ClaudeNameMatcher] = None
+        self._claude: Optional[ClaudeIbanMatcher] = None
         if claude_api_key and _claude_available:
             try:
-                self._claude = ClaudeNameMatcher(claude_api_key)
-                logger.info("Claude AI name matching enabled")
+                self._claude = ClaudeIbanMatcher(claude_api_key)
+                logger.info("Claude AI IBAN verification enabled")
             except Exception as exc:
                 logger.warning("Failed to init Claude matcher: %s", exc)
 
@@ -219,6 +218,13 @@ class MatchingEngine:
                      best_method, best_score, best_hadaf.name_arabic, bank_emp.name)
         return self._build(best_hadaf, bank_emp, best_method, best_score)
 
+    @staticmethod
+    def _iban_char_diff(a: str, b: str) -> int:
+        """عدد الخانات المختلفة بين آيبانين (إذا اختلف الطول → كبير)."""
+        if len(a) != len(b):
+            return 99
+        return sum(1 for x, y in zip(a, b) if x != y)
+
     def _run_claude_stage(
         self,
         pending: list[BankEmployee],
@@ -228,38 +234,55 @@ class MatchingEngine:
         review: list[MatchResult],
         bank_report: list[BankReportRow],
     ) -> list[BankEmployee]:
-        """Run Claude AI matching on unmatched bank employees. Returns still-unmatched list."""
-        available_hadaf = [e for e in hadaf_employees if e.serial not in matched_hadaf_serials]
-        if not available_hadaf:
+        """
+        تدقيق آيبانات بالذكاء الاصطناعي: الموظفون الذين عندهم آيبان في البنك
+        لم يتطابق نصياً، نقارن آيبانهم مع آيبانات هدف القريبة (أخطاء OCR محتملة).
+        التطابق المؤكد يُعدّ تطابق آيبان رسمي (claude_iban).
+        """
+        # آيبانات هدف المتاحة (لم تُطابَق بعد) مع الموظف صاحبها
+        hadaf_ibans: list[tuple[str, HadafEmployee]] = []
+        for e in hadaf_employees:
+            if e.serial in matched_hadaf_serials:
+                continue
+            for iban in e.all_ibans:
+                hadaf_ibans.append((iban.upper(), e))
+
+        if not hadaf_ibans:
             return pending
 
         still_unmatched: list[BankEmployee] = []
 
         for bank_emp in pending:
-            pairs = [(h.name_arabic, bank_emp.name) for h in available_hadaf]
-            scores = self._claude.match_pairs(pairs)  # type: ignore[union-attr]
-
-            best_idx = max(range(len(scores)), key=lambda i: scores[i])
-            best_score = scores[best_idx]
-
-            if best_score < CONFIG.thresholds.REVIEW:
+            bank_iban = (bank_emp.iban or "").upper()
+            if not bank_iban:
                 still_unmatched.append(bank_emp)
                 continue
 
-            best_hadaf = available_hadaf[best_idx]
-            if best_hadaf.serial in matched_hadaf_serials:
+            # رشّح آيبانات هدف القريبة (اختلاف ≤ 4 خانات) لتقليل تكلفة الـ API
+            candidates = [
+                (h_iban, emp) for h_iban, emp in hadaf_ibans
+                if emp.serial not in matched_hadaf_serials
+                and self._iban_char_diff(bank_iban, h_iban) <= 4
+            ]
+            if not candidates:
                 still_unmatched.append(bank_emp)
                 continue
 
-            result = self._build(best_hadaf, bank_emp, "claude_ai", best_score)
+            pairs = [(h_iban, bank_iban) for h_iban, _ in candidates]
+            verdicts = self._claude.verify_pairs(pairs)  # type: ignore[union-attr]
+
+            match_idx = next((i for i, ok in enumerate(verdicts) if ok), None)
+            if match_idx is None:
+                still_unmatched.append(bank_emp)
+                continue
+
+            best_hadaf = candidates[match_idx][1]
+            result = self._build(best_hadaf, bank_emp, "claude_iban", 100.0)
             matched_hadaf_serials.add(best_hadaf.serial)
-            logger.debug("Stage 6 (Claude %.1f%%): %s ↔ %s", best_score, best_hadaf.name_arabic, bank_emp.name)
+            logger.debug("Stage 6 (Claude IBAN): %s ↔ %s (هدف #%d)",
+                         bank_iban, candidates[match_idx][0], best_hadaf.serial)
 
-            if result.status == "matched":
-                matched.append(result)
-            else:
-                review.append(result)
-
+            matched.append(result)
             bank_report.append(BankReportRow(
                 bank_name=result.bank_name,
                 hadaf_serial=result.hadaf_serial,

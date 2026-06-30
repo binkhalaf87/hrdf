@@ -96,7 +96,7 @@ st.markdown("""
     <span class="info-chip">4️⃣ الاسم العربي</span>
     <span class="info-chip">5️⃣ مطابقة ذكية</span>
     <span class="info-chip">6️⃣ ترجمة عربي↔إنجليزي</span>
-    <span class="info-chip">7️⃣ Claude AI</span>
+    <span class="info-chip">7️⃣ تدقيق آيبان بـ Claude AI</span>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -144,8 +144,8 @@ def _save_key(key: str) -> None:
 if "claude_api_key" not in st.session_state:
     st.session_state["claude_api_key"] = _load_saved_key()
 
-with st.expander("🤖 إعدادات المطابقة الذكية بالذكاء الاصطناعي (اختياري)", expanded=False):
-    st.caption("أدخل مفتاح Claude API لتفعيل مرحلة المطابقة الذكية للأسماء غير المتطابقة")
+with st.expander("🤖 تدقيق الآيبان بالذكاء الاصطناعي (اختياري)", expanded=False):
+    st.caption("أدخل مفتاح Claude API لتدقيق آيبانات هدف مع البنك واكتشاف أخطاء القراءة الضوئية (OCR) — المطابقة تبقى بالآيبان فقط")
     col_key, col_btn = st.columns([4, 1])
     with col_key:
         claude_api_key = st.text_input(
@@ -162,9 +162,9 @@ with st.expander("🤖 إعدادات المطابقة الذكية بالذكا
             st.session_state["claude_api_key"] = claude_api_key
             st.success("✅ تم الحفظ")
     if claude_api_key:
-        st.success("✅ سيتم تفعيل مطابقة الأسماء بالذكاء الاصطناعي (المرحلة 7)")
+        st.success("✅ سيتم تدقيق الآيبانات غير المتطابقة نصياً بالذكاء الاصطناعي")
     else:
-        st.info("ℹ️ بدون مفتاح API ستعمل مراحل المطابقة 1-6 فقط")
+        st.info("ℹ️ بدون مفتاح API ستعتمد المطابقة على تطابق الآيبان النصي فقط")
 
 process_btn = st.button(
     "⚙️ بدء المطابقة",
@@ -381,10 +381,12 @@ if "result" in st.session_state:
     # ── الزران الرئيسيان جنباً لجنب ────────────────────────────────────
     st.markdown("### ⬇️ تحميل الكشف المُحدَّث")
 
-    # مجموعة الأرقام التسلسلية المطابَقة — كل من وُجد في البنك بأي طريقة
+    # مجموعة الأرقام التسلسلية المطابَقة — بالآيبان فقط (المطابقة الرسمية)
+    # الذكاء الاصطناعي يتحقق من صحة مطابقة الآيبان (أخطاء OCR) ويُعدّ مطابقة آيبان
     matched_serials_set = {
         mr.hadaf_serial
         for mr in result.matched + result.review
+        if mr.match_method in ("iban", "claude_iban")
     }
 
     with st.spinner("جاري تعديل ملف البنك الأصلي بإضافة رقم هدف..."):

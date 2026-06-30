@@ -229,7 +229,7 @@ class ExcelWriter:
         "transliteration_ar_en":  "ترجمة عربي→إنجليزي",
         "transliteration_en_ar":  "ترجمة إنجليزي→عربي",
         "transliteration_both_ar":"ترجمة",
-        "claude_ai":              "ذكاء اصطناعي",
+        "claude_iban":            "آيبان (تدقيق ذكاء اصطناعي)",
     }
 
     def build_hadaf_status_excel(
@@ -267,7 +267,7 @@ class ExcelWriter:
             in_bank = e.serial in matched_serials
             status  = "مضاف ✅" if in_bank else "غير مضاف ❌"
             fill    = fill_green if in_bank else fill_orange
-            method_key = (match_method_by_hadaf or {}).get(e.serial, "")
+            method_key = (match_method_by_hadaf or {}).get(e.serial, "") if in_bank else ""
             method_ar  = self._METHOD_AR.get(method_key, method_key) if method_key else ""
             vals = [
                 e.serial,

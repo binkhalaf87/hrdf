@@ -1,112 +1,99 @@
 from __future__ import annotations
 
 import json
-from typing import Optional
 
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-_SYSTEM_PROMPT = """أنت نظام مطابقة أسماء موظفين دقيق ومتخصص في الأسماء العربية والمحولة للإنجليزية.
+_SYSTEM_PROMPT = """أنت نظام تدقيق آيبانات بنكية صارم. مهمتك مقارنة آيبان من ملف هدف مع آيبان من ملف البنك للتأكد أنهما لنفس الحساب رغم أخطاء القراءة الضوئية (OCR).
 
-قواعد صارمة للتقييم:
+الآيبان السعودي يتكون من: SA + رقمان للتحقق + 22 خانة (إجمالي 24 حرف/رقم).
 
-✅ يُعدّ تطابقاً (نسبة 85-100) إذا:
-- الأسماء متطابقة تماماً بعد تطبيع الهمزات والتاء المربوطة
-- نفس الأسماء بترتيب مختلف (محمد أحمد علي = علي أحمد محمد)
-- الاسم العربي محوّل للإنجليزية بنطق مطابق (عبدالله = Abdullah, محمد = Mohammed/Muhammad)
-- اختلاف في كلمة "ال" التعريف فقط (الأحمد = أحمد)
+قواعد التدقيق الصارمة:
 
-⚠️ يُعدّ مشابهاً يحتاج مراجعة (نسبة 60-84) إذا:
-- 3 من 4 أسماء متطابقة والرابع مختلف
-- خطأ إملائي واضح في كلمة واحدة فقط
-- النطق الإنجليزي قريب لكن ليس دقيقاً
+✅ يُعدّ تطابقاً (match=true) فقط إذا:
+- الآيبانان متطابقان حرفاً بحرف، أو
+- الاختلاف الوحيد ناتج عن خطأ OCR شائع ومؤكد:
+  • 0 ↔ O      • 1 ↔ I/l     • 5 ↔ S      • 8 ↔ B      • 6 ↔ G
+  • 2 ↔ Z      • فراغات/مسافات زائدة
 
-❌ لا يُعدّ تطابقاً (نسبة 0-59) إذا:
-- اختلاف في أكثر من اسم واحد دون مبرر
-- أسماء مختلفة كلياً حتى لو بعض الأحرف متشابهة
-- شخصان مختلفان واضحان
+❌ لا يُعدّ تطابقاً (match=false) إذا:
+- اختلاف في رقمين أو أكثر
+- اختلاف في خانة لا يفسرها خطأ OCR معروف
+- اختلاف في طول الآيبان (بعد إزالة الفراغات)
+- أي شك — الأصل عدم المطابقة
 
-مبادئ التقييم:
-1. كن متحفظاً — المطابقة الخاطئة أسوأ من عدم المطابقة
-2. ركز على جوهر الاسم الثلاثي أو الرباعي وليس الكلمات الفردية
-3. الأسماء العربية المحولة للإنجليزية: قارن بالنطق لا بالكتابة
-4. ابحث في كل الكلمات — لا تكتفِ بالكلمة الأولى
-5. أعطِ نفس النتيجة دائماً لنفس الأسماء (ثابت وحتمي)"""
+مبادئ:
+1. كن صارماً جداً — مطابقة آيبان خاطئة تعني تحويل مالي لشخص خاطئ
+2. لا تطابق بناءً على التشابه العام، بل على خطأ OCR محدد ومبرر
+3. أعطِ نفس النتيجة دائماً لنفس المدخلات (حتمي)"""
 
 
 def _build_prompt(pairs: list[tuple[str, str]]) -> str:
     lines = []
-    for i, (arabic, bank) in enumerate(pairs):
-        lines.append(f'{i + 1}. هدف: "{arabic}" ←→ بنك: "{bank}"')
+    for i, (hadaf_iban, bank_iban) in enumerate(pairs):
+        lines.append(f'{i + 1}. هدف: "{hadaf_iban}" ←→ بنك: "{bank_iban}"')
 
     items = "\n".join(lines)
-    return f"""قارن كل زوج من الأسماء وأعطِ نسبة تطابق دقيقة:
+    return f"""دقّق كل زوج من الآيبانات وحدّد هل هما لنفس الحساب:
 
 {items}
 
-أجب بـ JSON فقط — لا تضف أي نص خارج JSON:
+أجب بـ JSON فقط — لا نص خارج JSON:
 [
-  {{"index": 1, "score": 95, "reason": "سبب موجز"}},
-  ...
+  {{"index": 1, "match": true, "reason": "تطابق تام"}},
+  {{"index": 2, "match": false, "reason": "اختلاف في 3 خانات"}}
 ]
 
 تأكد من وجود مدخل لكل رقم من 1 إلى {len(pairs)}."""
 
 
-class ClaudeNameMatcher:
+class ClaudeIbanMatcher:
+    """يتحقق من تطابق الآيبانات بشكل صارم مع مراعاة أخطاء OCR."""
+
     def __init__(self, api_key: str):
         import anthropic
         self._client = anthropic.Anthropic(api_key=api_key)
 
-    def match_pairs(
-        self,
-        pairs: list[tuple[str, str]],
-        batch_size: int = 15,
-    ) -> list[float]:
-        scores: list[float] = [0.0] * len(pairs)
-
+    def verify_pairs(self, pairs: list[tuple[str, str]], batch_size: int = 20) -> list[bool]:
+        """
+        لكل (hadaf_iban, bank_iban) يرجع True إذا كانا لنفس الحساب.
+        """
+        results: list[bool] = [False] * len(pairs)
         for start in range(0, len(pairs), batch_size):
             batch = pairs[start: start + batch_size]
-            batch_scores = self._call_claude(batch)
-            for i, score in enumerate(batch_scores):
-                scores[start + i] = score
+            batch_res = self._call_claude(batch)
+            for i, ok in enumerate(batch_res):
+                results[start + i] = ok
+        return results
 
-        return scores
-
-    def _call_claude(self, pairs: list[tuple[str, str]]) -> list[float]:
+    def _call_claude(self, pairs: list[tuple[str, str]]) -> list[bool]:
         prompt = _build_prompt(pairs)
         try:
             message = self._client.messages.create(
                 model="claude-opus-4-8",
                 max_tokens=2048,
-                temperature=0,          # حتمي — نفس النتيجة في كل مرة
+                temperature=0,
                 system=_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": prompt}],
             )
             raw = message.content[0].text.strip()
-
-            # Strip markdown code fences if present
             if "```" in raw:
-                parts = raw.split("```")
-                for part in parts:
+                for part in raw.split("```"):
                     part = part.strip()
                     if part.startswith("json"):
                         part = part[4:].strip()
                     if part.startswith("["):
                         raw = part
                         break
-
             data = json.loads(raw)
-            result = [0.0] * len(pairs)
+            result = [False] * len(pairs)
             for item in data:
                 idx = item["index"] - 1
                 if 0 <= idx < len(pairs):
-                    result[idx] = float(item.get("score", 0))
-
-            logger.debug("Claude matched %d pairs", len(pairs))
+                    result[idx] = bool(item.get("match", False))
             return result
-
         except Exception as exc:
-            logger.warning("Claude name matching failed: %s", exc)
-            return [0.0] * len(pairs)
+            logger.warning("Claude IBAN verification failed: %s", exc)
+            return [False] * len(pairs)
