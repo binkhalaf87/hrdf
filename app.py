@@ -23,12 +23,57 @@ st.set_page_config(
     page_title="نظام مطابقة رواتب هدف",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 st.markdown("""
 <style>
-body, .stApp { direction: rtl; }
+/* إخفاء الشريط الجانبي بالكامل */
+[data-testid="stSidebar"] { display: none !important; }
+[data-testid="collapsedControl"] { display: none !important; }
+
+body, .stApp { direction: rtl; font-family: 'Segoe UI', Tahoma, sans-serif; }
+
+/* هيدر رئيسي */
+.hero-header {
+    background: linear-gradient(135deg, #1a3c6e 0%, #2563a8 60%, #1e88e5 100%);
+    border-radius: 16px;
+    padding: 36px 40px 28px 40px;
+    margin-bottom: 28px;
+    text-align: center;
+    color: white;
+    box-shadow: 0 4px 24px rgba(30,136,229,0.18);
+}
+.hero-header h1 { font-size: 2rem; font-weight: 700; margin: 0 0 6px 0; letter-spacing: -0.5px; }
+.hero-header p  { font-size: 1rem; opacity: 0.85; margin: 0; }
+
+/* بطاقات الرفع */
+.upload-card {
+    background: #f8fafd;
+    border: 2px dashed #b0c4de;
+    border-radius: 14px;
+    padding: 24px 20px;
+    text-align: center;
+    transition: border-color .2s;
+}
+.upload-card:hover { border-color: #2563a8; }
+.upload-card-title { font-size: 1.05rem; font-weight: 600; color: #1a3c6e; margin-bottom: 4px; }
+.upload-card-sub   { font-size: 0.82rem; color: #6b7280; margin-bottom: 14px; }
+
+/* شرائح معلومات المراحل */
+.info-strip {
+    display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;
+    margin: 18px 0 0 0;
+}
+.info-chip {
+    background: rgba(255,255,255,0.15);
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 20px;
+    padding: 4px 14px;
+    font-size: 0.8rem;
+    color: white;
+}
+
 .status-box { border-radius:8px; padding:12px 16px; margin:6px 0; font-size:15px; }
 .green  { background:#c6efce; border-left:4px solid #1a7a1a; }
 .yellow { background:#ffeb9c; border-left:4px solid #b86e00; }
@@ -37,55 +82,51 @@ body, .stApp { direction: rtl; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Sidebar ──────────────────────────────────────────────────────────────────
-with st.sidebar:
-    st.title("📊 نظام المطابقة")
-    st.markdown("---")
-    st.markdown("""
-**الإصدار:** 1.1.0
+show_debug = False  # إخفاء التشخيص بشكل افتراضي
 
-**مراحل المطابقة:**
-1. رقم الآيبان (هدف ↔ بنك)
-2. رقم الهوية الوطنية
-3. الرقم التسلسلي
-4. الاسم العربي الكامل
-5. مطابقة ذكية (RapidFuzz)
-6. ترجمة عربي ↔ إنجليزي
+# ── Hero Header ───────────────────────────────────────────────────────────────
+st.markdown("""
+<div class="hero-header">
+  <h1>🏦 نظام مطابقة رواتب هدف مع البنوك</h1>
+  <p>ارفع ملف هدف وملف البنك للحصول على تقرير المطابقة فوراً</p>
+  <div class="info-strip">
+    <span class="info-chip">1️⃣ آيبان</span>
+    <span class="info-chip">2️⃣ رقم الهوية</span>
+    <span class="info-chip">3️⃣ الرقم التسلسلي</span>
+    <span class="info-chip">4️⃣ الاسم العربي</span>
+    <span class="info-chip">5️⃣ مطابقة ذكية</span>
+    <span class="info-chip">6️⃣ ترجمة عربي↔إنجليزي</span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
-**حدود الثقة (مطابقة الأسماء):**
-- ✅ ≥ 95%: مطابق
-- ⚠️ 80–95%: يحتاج مراجعة
-- ❌ < 80%: غير مطابق
-
-**نسبة التغطية:**
-موظفو هدف الذين نزل راتبهم ÷ إجمالي موظفي هدف
-""")
-    st.markdown("---")
-    show_debug = st.checkbox("🔍 عرض تشخيص PDF", value=False)
-
-# ── Main ──────────────────────────────────────────────────────────────────────
-st.title("🏦 نظام مطابقة رواتب هدف مع البنوك السعودية")
-
-col_h, col_b = st.columns(2)
+# ── رفع الملفات ───────────────────────────────────────────────────────────────
+col_h, col_b = st.columns(2, gap="large")
 with col_h:
-    st.subheader("📁 ملف هدف")
+    st.markdown('<div class="upload-card-title">📁 ملف هدف</div><div class="upload-card-sub">PDF أو Excel ببيانات برنامج هدف</div>', unsafe_allow_html=True)
     hadaf_file = st.file_uploader(
-        "ارفع ملف هدف (PDF أو Excel)",
+        "ملف هدف",
         type=["pdf", "xlsx", "xls"],
         key="hadaf_up",
-        help="ملف PDF أو Excel ببيانات موظفي برنامج هدف",
+        label_visibility="collapsed",
     )
     if hadaf_file:
         ext = Path(hadaf_file.name).suffix.lower()
-        st.caption(f"{'📄 Excel' if ext in ('.xlsx', '.xls') else '📑 PDF'} — {hadaf_file.name}")
+        st.success(f"{'📄 Excel' if ext in ('.xlsx', '.xls') else '📑 PDF'} — {hadaf_file.name}")
 with col_b:
-    st.subheader("🏦 ملف البنك (Bank PDF)")
-    bank_file  = st.file_uploader("ارفع ملف البنك", type=["pdf"], key="bank_up",
-                                   help="ملف PDF كشف رواتب البنك")
+    st.markdown('<div class="upload-card-title">🏦 ملف البنك</div><div class="upload-card-sub">PDF كشف رواتب البنك</div>', unsafe_allow_html=True)
+    bank_file = st.file_uploader(
+        "ملف البنك",
+        type=["pdf"],
+        key="bank_up",
+        label_visibility="collapsed",
+    )
+    if bank_file:
+        st.success(f"📑 PDF — {bank_file.name}")
 
-st.markdown("---")
+st.markdown("<br>", unsafe_allow_html=True)
 process_btn = st.button(
-    "⚙️ معالجة الملفات / Process Files",
+    "⚙️ بدء المطابقة",
     type="primary",
     use_container_width=True,
     disabled=(hadaf_file is None or bank_file is None),
