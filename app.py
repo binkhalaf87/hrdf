@@ -299,7 +299,11 @@ if "result" in st.session_state:
     st.markdown("### ⬇️ تحميل الكشف المُحدَّث")
 
     # مجموعة الأرقام التسلسلية المطابَقة — دائماً من MatchingEngine ليتطابق مع KPI
-    matched_serials_set = {mr.hadaf_serial for mr in result.matched + result.review}
+    matched_serials_set = {
+        mr.hadaf_serial
+        for mr in result.matched + result.review
+        if mr.match_method == "iban"
+    }
 
     with st.spinner("جاري تعديل ملف البنك الأصلي بإضافة رقم هدف..."):
         if is_excel_mode and hadaf_by_iban_for_pdf:
