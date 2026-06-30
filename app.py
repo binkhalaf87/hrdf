@@ -295,80 +295,9 @@ if "result" in st.session_state:
             unsafe_allow_html=True,
         )
 
-    st.markdown("---")
-
-    import pandas as pd
-
-    # ---- الجدول الرئيسي: كشف البنك مع رقم هدف أولاً ----
-    st.markdown("### 📄 كشف الرواتب المُحدَّث")
-    st.caption("رقم هدف أول عمود — أخضر: مطابق تام | أصفر: يحتاج مراجعة | أحمر: غير مطابق")
-
-    def _row_color(status):
-        return {"matched": "🟢", "review": "🟡", "bank_only": "🔴"}.get(status, "⚪")
-
-    df_main = pd.DataFrame([{
-        "رقم هدف": (
-            str(r.hadaf_serial) if r.status == "matched"
-            else (f"{r.hadaf_serial}؟" if r.status == "review" else "—")
-        ),
-        "اسم الموظف": r.bank_name,
-        "الآيبان": r.iban or "",
-        "المبلغ": r.bank_amount,
-        "رقم المرجع": r.reference or "",
-        "الحالة": _row_color(r.status),
-    } for r in result.bank_report])
-    st.dataframe(df_main, use_container_width=True, hide_index=True)
-
-    st.markdown("---")
-
-    # ---- تفاصيل إضافية في tabs ----
-    tab_review, tab_unmatched, tab_hadaf_only = st.tabs([
-        "⚠️ يحتاج مراجعة بشرية",
-        "❌ غير مطابق من البنك",
-        "📋 موظفو هدف لم ينزل راتبهم",
-    ])
-
-    with tab_review:
-        if result.review:
-            df = pd.DataFrame([{
-                "اسم البنك":            r.bank_name,
-                "الاسم المقترح (هدف)": r.hadaf_name,
-                "رقم هدف المقترح":     r.hadaf_serial,
-                "المبلغ (البنك)":      r.bank_amount,
-                "طريقة المطابقة":      r.match_method,
-                "الثقة %":             f"{r.confidence:.1f}%",
-            } for r in result.review])
-            st.dataframe(df, use_container_width=True, hide_index=True)
-        else:
-            st.success("لا توجد سجلات تحتاج مراجعة ✅")
-
-    with tab_unmatched:
-        if result.unmatched_bank:
-            df = pd.DataFrame([{
-                "اسم البنك":   e.name,
-                "الآيبان":    e.iban or "",
-                "المبلغ":     e.amount,
-                "رقم المرجع": e.reference or "",
-            } for e in result.unmatched_bank])
-            st.dataframe(df, use_container_width=True, hide_index=True)
-        else:
-            st.success("جميع سجلات البنك تم مطابقتها ✅")
-
-    with tab_hadaf_only:
-        if result.unmatched_hadaf:
-            df = pd.DataFrame([{
-                "رقم هدف":     e.serial,
-                "اسم الموظف":  e.name_arabic,
-                "رقم الهوية":  e.national_id or "",
-                "الآيبان":     e.iban or "",
-            } for e in result.unmatched_hadaf])
-            st.dataframe(df, use_container_width=True, hide_index=True)
-        else:
-            st.success("جميع موظفي هدف موجودون في ملف البنك ✅")
-
     # ── Downloads ────────────────────────────────────────────────────────
     st.markdown("---")
-    st.markdown("## 📥 تحميل التقارير")
+    st.markdown("## 📥 التقارير")
 
     writer     = ExcelWriter()
     pdf_writer = PDFWriter()
@@ -377,36 +306,26 @@ if "result" in st.session_state:
     bank_raw             = st.session_state.get("bank_raw")
     bank_bytes           = st.session_state.get("bank_bytes", b"")
     hadaf_by_iban_for_pdf = st.session_state.get("hadaf_by_iban_for_pdf")
+    hadaf_employees_list  = st.session_state.get("hadaf_employees", [])
 
-    # ── الزران الرئيسيان جنباً لجنب ────────────────────────────────────
-    st.markdown("### ⬇️ تحميل الكشف المُحدَّث")
-
-    # مجموعة الأرقام التسلسلية المطابَقة — بالآيبان فقط (المطابقة الرسمية)
-    # الذكاء الاصطناعي يتحقق من صحة مطابقة الآيبان (أخطاء OCR) ويُعدّ مطابقة آيبان
+    # الأرقام التسلسلية المطابَقة — بالآيبان فقط
     matched_serials_set = {
         mr.hadaf_serial
         for mr in result.matched + result.review
         if mr.match_method in ("iban", "claude_iban")
     }
 
-    with st.spinner("جاري تعديل ملف البنك الأصلي بإضافة رقم هدف..."):
+    # 1) الملف البنكي بعد التعديل (رقم هدف مُضاف)
+    with st.spinner("جاري إعداد الملف البنكي بعد التعديل..."):
         if is_excel_mode and hadaf_by_iban_for_pdf:
-            pdf_bytes, _ = PDFOverlayWriter().overlay(
-                bank_bytes, hadaf_by_iban_for_pdf
-            )
-            pdf_label = "🖨️ تحميل ملف البنك الأصلي المعدَّل (رقم هدف مُضاف)"
-            pdf_help  = "نفس ملف البنك الأصلي بالضبط — رقم هدف مُضاف في الهامش الأيمن بجانب كل موظف"
+            pdf_bytes, _ = PDFOverlayWriter().overlay(bank_bytes, hadaf_by_iban_for_pdf)
         else:
             pdf_bytes = pdf_writer.build_bank_report_pdf(
                 result.bank_report,
                 title="كشف الرواتب المُحدَّث — برنامج هدف",
             )
-            pdf_label = "🖨️ تحميل كشف البنك PDF (رقم هدف كأول عمود)"
-            pdf_help  = "نفس بيانات البنك — رقم هدف التسلسلي العمود الأول، ثم اسم الموظف، الآيبان، المبلغ"
 
-    # بناء dict: hadaf_serial → رقم م في البنك (للتحقق العكسي)
-    # — مطابَق بالإيبان: يُكتب رقم م
-    # — مطابَق بالاسم/الهوية: يُكتب اسم الموظف في ملف البنك
+    # bank_serial_by_hadaf: hadaf_serial → رقم م في البنك (للمطابَقين بالآيبان)
     bank_serial_by_hadaf: dict[int, str] = {}
     if is_excel_mode and bank_raw and hadaf_by_iban_for_pdf:
         for rec in bank_raw:
@@ -424,114 +343,51 @@ if "result" in st.session_state:
             if mr.iban and mr.iban.upper() in bank_serial_by_iban:
                 bank_serial_by_hadaf[mr.hadaf_serial] = bank_serial_by_iban[mr.iban.upper()]
 
-    # للموظفين المطابَقين بالاسم/الهوية (لا إيبان) — أضف اسم البنك بدلاً من رقم م
-    for mr in result.matched + result.review:
-        if mr.hadaf_serial not in bank_serial_by_hadaf and mr.bank_name:
-            bank_serial_by_hadaf[mr.hadaf_serial] = mr.bank_name
-
-    # dict: hadaf_serial → طريقة المطابقة
     match_method_by_hadaf: dict[int, str] = {
         mr.hadaf_serial: mr.match_method
         for mr in result.matched + result.review
     }
 
-    hadaf_employees_list = st.session_state.get("hadaf_employees", [])
-    with st.spinner("جاري بناء قائمة موظفي هدف..."):
-        excel_status_bytes = writer.build_hadaf_status_excel(
-            hadaf_employees_list, matched_serials_set, bank_serial_by_hadaf,
-            match_method_by_hadaf,
-        )
+    # 2) الموظفون المطابقون  3) الموظفون غير المطابقين  (تقسيم حسب الآيبان)
+    matched_emps   = [e for e in hadaf_employees_list if e.serial in matched_serials_set]
+    unmatched_emps = [e for e in hadaf_employees_list if e.serial not in matched_serials_set]
 
-    col_pdf, col_hadaf_xl = st.columns(2)
-    with col_pdf:
+    with st.spinner("جاري بناء تقارير الموظفين..."):
+        excel_matched = writer.build_hadaf_status_excel(
+            matched_emps, matched_serials_set, bank_serial_by_hadaf, match_method_by_hadaf,
+        )
+        excel_unmatched = writer.build_hadaf_not_in_bank_excel(unmatched_emps)
+
+    r1, r2, r3 = st.columns(3)
+    with r1:
         st.download_button(
-            label=pdf_label,
+            label=f"🏦 البنكي بعد التعديل",
             data=pdf_bytes,
-            file_name="كشف_البنك_مع_رقم_هدف.pdf",
+            file_name="البنك_بعد_التعديل.pdf",
             mime="application/pdf",
             use_container_width=True,
             type="primary",
-            help=pdf_help,
+            help="ملف البنك الأصلي مع إضافة رقم هدف بجانب كل موظف مطابَق",
         )
-    with col_hadaf_xl:
+    with r2:
         st.download_button(
-            label=f"📋 تحميل موظفو هدف مع حالة البنك ({len(hadaf_employees_list)} موظف)",
-            data=excel_status_bytes,
-            file_name="موظفو_هدف_حالة_البنك.xlsx",
+            label=f"✅ الموظفون المطابقون ({len(matched_emps)})",
+            data=excel_matched,
+            file_name="الموظفون_المطابقون.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
             type="primary",
-            help="قائمة كاملة لجميع موظفي هدف مع عمود يوضح هل نزل راتب كل موظف في البنك أم لا",
+            help="موظفو هدف الذين تطابق آيبانهم ونزل راتبهم في البنك",
         )
-
-    # ── Excel المطابقة بالآيبان (الزر الرئيسي الثاني) ───────────────────
-    if is_excel_mode and bank_raw and hadaf_by_iban_for_pdf:
-        st.markdown("---")
-        st.markdown("### 📥 Excel المطابقة بالآيبان")
-
-        hadaf_employees_list = st.session_state["hadaf_employees"]
-        hadaf_name_by_iban   = {e.iban.upper(): e.name_arabic
-                                 for e in hadaf_employees_list if e.iban}
-        hadaf_amount_by_iban = {e.iban.upper(): e.support_amount
-                                 for e in hadaf_employees_list
-                                 if e.iban and e.support_amount is not None}
-
-        with st.spinner("جاري توليد Excel..."):
-            excel_iban = writer.build_iban_matched_excel(
-                bank_raw,
-                hadaf_by_iban_for_pdf,
-                hadaf_name_by_iban,
-                hadaf_amount_by_iban,
-            )
-
-        matched_count = sum(
-            1 for r in bank_raw
-            if r.iban and r.iban.upper() in hadaf_by_iban_for_pdf
-        )
+    with r3:
         st.download_button(
-            label=f"📊 تحميل Excel المطابقة بالآيبان  ({matched_count} موظف مطابَق)",
-            data=excel_iban,
-            file_name="مطابقة_هدف_بالآيبان.xlsx",
+            label=f"❌ الموظفون غير المطابقين ({len(unmatched_emps)})",
+            data=excel_unmatched,
+            file_name="الموظفون_غير_المطابقين.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
             type="primary",
-        )
-
-    # ── تقارير ثانوية ────────────────────────────────────────────────────
-    st.markdown("---")
-    st.markdown("**تقارير إضافية:**")
-    d1, d2, d3, d4 = st.columns(4)
-    with d1:
-        st.download_button(
-            "📊 Excel كامل",
-            data=writer.build_bank_report_excel(result.bank_report),
-            file_name="كشف_الرواتب_مع_رقم_هدف.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
-    with d2:
-        st.download_button(
-            "📙 يحتاج مراجعة",
-            data=writer.build_review_excel(result.review),
-            file_name="review.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
-    with d3:
-        st.download_button(
-            "📕 غير مطابق",
-            data=writer.build_unmatched_excel(result.unmatched_bank),
-            file_name="unmatched.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-        )
-    with d4:
-        st.download_button(
-            "📘 الملخص",
-            data=writer.build_summary_excel(s, result.matched, result.review),
-            file_name="summary.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
+            help="موظفو هدف الذين لم يتطابق آيبانهم في البنك",
         )
 
 elif hadaf_file is None or bank_file is None:
