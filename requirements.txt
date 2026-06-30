@@ -17,6 +17,7 @@ pdf2image>=1.17.0
 
 # Matching
 rapidfuzz>=3.6.1
+anthropic>=0.92.0
 
 # Arabic text support
 arabic-reshaper>=3.0.0

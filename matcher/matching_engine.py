@@ -8,6 +8,12 @@ from matcher.name_matcher import best_name_score
 from utils.config import CONFIG
 from utils.logger import get_logger
 
+try:
+    from matcher.claude_matcher import ClaudeNameMatcher
+    _claude_available = True
+except ImportError:
+    _claude_available = False
+
 logger = get_logger(__name__)
 
 
@@ -37,14 +43,24 @@ def _amount_diff(bank: float, hadaf: Optional[float]) -> Optional[float]:
 
 class MatchingEngine:
     """
-    5-stage matching pipeline:
+    6-stage matching pipeline:
     Stage 1  — IBAN (Hadaf has IBAN)     → 100%
     Stage 2  — National ID               → 100%
     Stage 3  — Bank serial == Hadaf serial → 100%
     Stage 4  — Arabic name exact (normalised) → 100%
     Stage 5a — RapidFuzz fuzzy Arabic    → variable
     Stage 5b — Arabic↔English transliteration → variable
+    Stage 6  — Claude AI name matching   → variable (optional, requires API key)
     """
+
+    def __init__(self, claude_api_key: Optional[str] = None):
+        self._claude: Optional[ClaudeNameMatcher] = None
+        if claude_api_key and _claude_available:
+            try:
+                self._claude = ClaudeNameMatcher(claude_api_key)
+                logger.info("Claude AI name matching enabled")
+            except Exception as exc:
+                logger.warning("Failed to init Claude matcher: %s", exc)
 
     def match(
         self,
@@ -66,6 +82,9 @@ class MatchingEngine:
         matched_hadaf_serials: set[int] = set()
 
         bank_report: list[BankReportRow] = []
+
+        # Stage 1-5: run standard matching
+        pending_unmatched: list[BankEmployee] = []
 
         for bank_emp in bank_employees:
             result = self._match_single(
@@ -95,20 +114,30 @@ class MatchingEngine:
                     reference=bank_emp.reference,
                 ))
             else:
-                unmatched_bank.append(bank_emp)
-                bank_report.append(BankReportRow(
-                    bank_name=bank_emp.name,
-                    hadaf_serial=None,
-                    hadaf_name=None,
-                    iban=bank_emp.iban,
-                    bank_amount=bank_emp.amount,
-                    hadaf_support_amount=None,
-                    amount_diff=None,
-                    match_method=None,
-                    confidence=None,
-                    status="bank_only",
-                    reference=bank_emp.reference,
-                ))
+                pending_unmatched.append(bank_emp)
+
+        # Stage 6: Claude AI matching for remaining unmatched employees
+        if self._claude and pending_unmatched:
+            pending_unmatched = self._run_claude_stage(
+                pending_unmatched, hadaf_employees,
+                matched_hadaf_serials, matched, review, bank_report,
+            )
+
+        for bank_emp in pending_unmatched:
+            unmatched_bank.append(bank_emp)
+            bank_report.append(BankReportRow(
+                bank_name=bank_emp.name,
+                hadaf_serial=None,
+                hadaf_name=None,
+                iban=bank_emp.iban,
+                bank_amount=bank_emp.amount,
+                hadaf_support_amount=None,
+                amount_diff=None,
+                match_method=None,
+                confidence=None,
+                status="bank_only",
+                reference=bank_emp.reference,
+            ))
 
         unmatched_hadaf = [
             e for e in hadaf_employees if e.serial not in matched_hadaf_serials
@@ -188,6 +217,63 @@ class MatchingEngine:
         logger.debug("Stage name (%s %.1f%%): %s ↔ %s",
                      best_method, best_score, best_hadaf.name_arabic, bank_emp.name)
         return self._build(best_hadaf, bank_emp, best_method, best_score)
+
+    def _run_claude_stage(
+        self,
+        pending: list[BankEmployee],
+        hadaf_employees: list[HadafEmployee],
+        matched_hadaf_serials: set[int],
+        matched: list[MatchResult],
+        review: list[MatchResult],
+        bank_report: list[BankReportRow],
+    ) -> list[BankEmployee]:
+        """Run Claude AI matching on unmatched bank employees. Returns still-unmatched list."""
+        available_hadaf = [e for e in hadaf_employees if e.serial not in matched_hadaf_serials]
+        if not available_hadaf:
+            return pending
+
+        still_unmatched: list[BankEmployee] = []
+
+        for bank_emp in pending:
+            pairs = [(h.name_arabic, bank_emp.name) for h in available_hadaf]
+            scores = self._claude.match_pairs(pairs)  # type: ignore[union-attr]
+
+            best_idx = max(range(len(scores)), key=lambda i: scores[i])
+            best_score = scores[best_idx]
+
+            if best_score < CONFIG.thresholds.REVIEW:
+                still_unmatched.append(bank_emp)
+                continue
+
+            best_hadaf = available_hadaf[best_idx]
+            if best_hadaf.serial in matched_hadaf_serials:
+                still_unmatched.append(bank_emp)
+                continue
+
+            result = self._build(best_hadaf, bank_emp, "claude_ai", best_score)
+            matched_hadaf_serials.add(best_hadaf.serial)
+            logger.debug("Stage 6 (Claude %.1f%%): %s ↔ %s", best_score, best_hadaf.name_arabic, bank_emp.name)
+
+            if result.status == "matched":
+                matched.append(result)
+            else:
+                review.append(result)
+
+            bank_report.append(BankReportRow(
+                bank_name=result.bank_name,
+                hadaf_serial=result.hadaf_serial,
+                hadaf_name=result.hadaf_name,
+                iban=result.iban,
+                bank_amount=result.bank_amount,
+                hadaf_support_amount=result.hadaf_support_amount,
+                amount_diff=result.amount_diff,
+                match_method=result.match_method,
+                confidence=result.confidence,
+                status=result.status,
+                reference=bank_emp.reference,
+            ))
+
+        return still_unmatched
 
     @staticmethod
     def _build(

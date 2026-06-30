@@ -96,6 +96,7 @@ st.markdown("""
     <span class="info-chip">4️⃣ الاسم العربي</span>
     <span class="info-chip">5️⃣ مطابقة ذكية</span>
     <span class="info-chip">6️⃣ ترجمة عربي↔إنجليزي</span>
+    <span class="info-chip">7️⃣ Claude AI</span>
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -125,6 +126,21 @@ with col_b:
         st.success(f"📑 PDF — {bank_file.name}")
 
 st.markdown("<br>", unsafe_allow_html=True)
+
+with st.expander("🤖 إعدادات المطابقة الذكية بالذكاء الاصطناعي (اختياري)", expanded=False):
+    st.caption("أدخل مفتاح Claude API لتفعيل مرحلة المطابقة الذكية للأسماء غير المتطابقة")
+    claude_api_key = st.text_input(
+        "مفتاح Claude API",
+        type="password",
+        placeholder="sk-ant-...",
+        key="claude_api_key",
+        label_visibility="collapsed",
+    )
+    if claude_api_key:
+        st.success("✅ سيتم تفعيل مطابقة الأسماء بالذكاء الاصطناعي (المرحلة 7)")
+    else:
+        st.info("ℹ️ بدون مفتاح API ستعمل مراحل المطابقة 1-6 فقط")
+
 process_btn = st.button(
     "⚙️ بدء المطابقة",
     type="primary",
@@ -207,8 +223,9 @@ if process_btn and hadaf_file and bank_file:
     st.success(f"✅ تم استخراج **{len(bank_employees)}** سجل من ملف البنك")
 
     # ── Match ─────────────────────────────────────────────────────────────────
+    _claude_key = st.session_state.get("claude_api_key", "").strip() or None
     with st.spinner("جاري المطابقة..."):
-        result = MatchingEngine().match(hadaf_employees, bank_employees)
+        result = MatchingEngine(claude_api_key=_claude_key).match(hadaf_employees, bank_employees)
 
     # Build IBAN lookup for the bank-style PDF (Excel mode only)
     hadaf_by_iban_for_pdf = (
