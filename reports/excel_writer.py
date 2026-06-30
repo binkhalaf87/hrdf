@@ -220,11 +220,24 @@ class ExcelWriter:
         } for e in employees])
         return self._single(df, "هدف غير موجود بالبنك", _ORANGE)
 
+    _METHOD_AR = {
+        "iban":                   "آيبان",
+        "national_id":            "رقم الهوية",
+        "serial_number":          "الرقم التسلسلي",
+        "exact_arabic":           "اسم عربي تام",
+        "fuzzy_arabic":           "اسم عربي تقريبي",
+        "transliteration_ar_en":  "ترجمة عربي→إنجليزي",
+        "transliteration_en_ar":  "ترجمة إنجليزي→عربي",
+        "transliteration_both_ar":"ترجمة",
+        "claude_ai":              "ذكاء اصطناعي",
+    }
+
     def build_hadaf_status_excel(
         self,
         employees: list[HadafEmployee],
         matched_serials: set[int],
         bank_serial_by_hadaf: dict[int, str] | None = None,
+        match_method_by_hadaf: dict[int, str] | None = None,
     ) -> bytes:
         """قائمة كاملة لموظفي هدف مع عمود حالة في البنك ورقم م من كشف البنك."""
         wb = Workbook()
@@ -233,7 +246,7 @@ class ExcelWriter:
         ws.sheet_view.rightToLeft = True
 
         has_bank_serial = bool(bank_serial_by_hadaf)
-        headers = ["رقم هدف", "اسم الموظف", "رقم الهوية", "الآيبان", "مبلغ هدف", "حالة في البنك"]
+        headers = ["رقم هدف", "اسم الموظف", "رقم الهوية", "الآيبان", "مبلغ هدف", "حالة في البنك", "طريقة المطابقة"]
         if has_bank_serial:
             headers.append("م / اسم الموظف في البنك")
 
@@ -242,7 +255,6 @@ class ExcelWriter:
             cell.font = Font(bold=True, color=_HEADER_FONT)
             cell.fill = PatternFill("solid", fgColor=_HEADER_BG)
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        # تمييز عمود رقم م بلون مختلف
         if has_bank_serial:
             col_m = len(headers)
             ws.cell(row=1, column=col_m).fill = PatternFill("solid", fgColor="1F4E79")
@@ -255,6 +267,8 @@ class ExcelWriter:
             in_bank = e.serial in matched_serials
             status  = "مضاف ✅" if in_bank else "غير مضاف ❌"
             fill    = fill_green if in_bank else fill_orange
+            method_key = (match_method_by_hadaf or {}).get(e.serial, "")
+            method_ar  = self._METHOD_AR.get(method_key, method_key) if method_key else ""
             vals = [
                 e.serial,
                 e.name_arabic,
@@ -262,6 +276,7 @@ class ExcelWriter:
                 e.iban or "",
                 e.support_amount if e.support_amount is not None else "",
                 status,
+                method_ar,
             ]
             if has_bank_serial:
                 vals.append(bank_serial_by_hadaf.get(e.serial, ""))
@@ -273,8 +288,9 @@ class ExcelWriter:
         _col_widths(ws, mn=10, mx=40)
         ws.column_dimensions["D"].width = 28  # IBAN
         ws.column_dimensions["F"].width = 16  # الحالة
+        ws.column_dimensions["G"].width = 22  # طريقة المطابقة
         if has_bank_serial:
-            ws.column_dimensions[chr(ord("F") + 1)].width = 30  # م / اسم البنك
+            ws.column_dimensions["H"].width = 30  # م / اسم البنك
         return _to_bytes(wb)
 
     def build_summary_excel(

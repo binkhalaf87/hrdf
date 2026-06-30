@@ -381,11 +381,10 @@ if "result" in st.session_state:
     # ── الزران الرئيسيان جنباً لجنب ────────────────────────────────────
     st.markdown("### ⬇️ تحميل الكشف المُحدَّث")
 
-    # مجموعة الأرقام التسلسلية المطابَقة — دائماً من MatchingEngine ليتطابق مع KPI
+    # مجموعة الأرقام التسلسلية المطابَقة — كل من وُجد في البنك بأي طريقة
     matched_serials_set = {
         mr.hadaf_serial
         for mr in result.matched + result.review
-        if mr.match_method == "iban"
     }
 
     with st.spinner("جاري تعديل ملف البنك الأصلي بإضافة رقم هدف..."):
@@ -428,10 +427,17 @@ if "result" in st.session_state:
         if mr.hadaf_serial not in bank_serial_by_hadaf and mr.bank_name:
             bank_serial_by_hadaf[mr.hadaf_serial] = mr.bank_name
 
+    # dict: hadaf_serial → طريقة المطابقة
+    match_method_by_hadaf: dict[int, str] = {
+        mr.hadaf_serial: mr.match_method
+        for mr in result.matched + result.review
+    }
+
     hadaf_employees_list = st.session_state.get("hadaf_employees", [])
     with st.spinner("جاري بناء قائمة موظفي هدف..."):
         excel_status_bytes = writer.build_hadaf_status_excel(
-            hadaf_employees_list, matched_serials_set, bank_serial_by_hadaf
+            hadaf_employees_list, matched_serials_set, bank_serial_by_hadaf,
+            match_method_by_hadaf,
         )
 
     col_pdf, col_hadaf_xl = st.columns(2)
